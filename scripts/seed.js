@@ -1,18 +1,18 @@
 require("dotenv").config();
-const connectDB = require("../config/db");
-const User = require("../src/models/User");
-const Attendance = require("../src/models/Attendance");
-const Leave = require("../src/models/Leave");
-const Task = require("../src/models/Task");
-const Project = require("../src/models/Project");
-const Payroll = require("../src/models/Payroll");
-const Client = require("../src/models/Client");
-const Invoice = require("../src/models/Invoice");
+const connectDB    = require("../config/db");
+const User         = require("../src/models/User");
+const Attendance   = require("../src/models/Attendance");
+const Leave        = require("../src/models/Leave");
+const Task         = require("../src/models/Task");
+const Project      = require("../src/models/Project");
+const Payroll      = require("../src/models/Payroll");
+const Client       = require("../src/models/Client");
+const Invoice      = require("../src/models/Invoice");
 const CalendarEvent = require("../src/models/CalendarEvent");
-const DailyStatus = require("../src/models/DailyStatus");
-const Timesheet = require("../src/models/Timesheet");
-const Vendor = require("../src/models/Vendor");
-const Freelancer = require("../src/models/Freelancer");
+const DailyStatus  = require("../src/models/DailyStatus");
+const Timesheet    = require("../src/models/Timesheet");
+const Vendor       = require("../src/models/Vendor");
+const Freelancer   = require("../src/models/Freelancer");
 
 /* ============================================================
    SEED USERS
@@ -22,58 +22,58 @@ const seedUsers = async () => {
 
   const defaultUsers = [
     {
-      name: "Admin User",
-      email: "admin@quibotech.com",
-      password: "admin123",
-      role: "admin",
+      name:       "Admin User",
+      email:      "admin@quibotech.com",
+      password:   "admin123",
+      role:       "admin",
       department: "Management",
-      phone: "9876543210",
-      isActive: true,
+      phone:      "9876543210",
+      isActive:   true,
     },
     {
-      name: "HR Manager",
-      email: "hr@quibotech.com",
-      password: "hr123456",
-      role: "hr",
+      name:       "HR Manager",
+      email:      "hr@quibotech.com",
+      password:   "hr123456",
+      role:       "hr",
       department: "Human Resources",
-      phone: "9876543211",
-      isActive: true,
+      phone:      "9876543211",
+      isActive:   true,
     },
     {
-      name: "Project Manager",
-      email: "manager@quibotech.com",
-      password: "manager123",
-      role: "manager",
+      name:       "Project Manager",
+      email:      "manager@quibotech.com",
+      password:   "manager123",
+      role:       "manager",
       department: "Engineering",
-      phone: "9876543212",
-      isActive: true,
+      phone:      "9876543212",
+      isActive:   true,
     },
     {
-      name: "John Employee",
-      email: "employee@quibotech.com",
-      password: "employee123",
-      role: "employee",
+      name:       "John Employee",
+      email:      "employee@quibotech.com",
+      password:   "employee123",
+      role:       "employee",
       department: "Engineering",
-      phone: "9876543213",
-      isActive: true,
+      phone:      "9876543213",
+      isActive:   true,
     },
     {
-      name: "Sara Developer",
-      email: "sara@quibotech.com",
-      password: "sara123456",
-      role: "employee",
+      name:       "Sara Developer",
+      email:      "sara@quibotech.com",
+      password:   "sara123456",
+      role:       "employee",
       department: "Development",
-      phone: "9876543214",
-      isActive: true,
+      phone:      "9876543214",
+      isActive:   true,
     },
     {
-      name: "David Engineer",
-      email: "david@quibotech.com",
-      password: "david123456",
-      role: "employee",
+      name:       "David Engineer",
+      email:      "david@quibotech.com",
+      password:   "david123456",
+      role:       "employee",
       department: "Development",
-      phone: "9876543215",
-      isActive: true,
+      phone:      "9876543215",
+      isActive:   true,
     },
   ];
 
@@ -100,9 +100,9 @@ const seedUsers = async () => {
 const seedAttendance = async (users) => {
   console.log("\n⏰  Seeding Attendance...");
 
-  const today      = new Date().toISOString().split("T")[0];
-  const yesterday  = new Date(Date.now() - 1 * 86400000).toISOString().split("T")[0];
-  const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0];
+  const today        = new Date().toISOString().split("T")[0];
+  const yesterday    = new Date(Date.now() - 1 * 86400000).toISOString().split("T")[0];
+  const twoDaysAgo   = new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0];
   const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split("T")[0];
   const fourDaysAgo  = new Date(Date.now() - 4 * 86400000).toISOString().split("T")[0];
 
@@ -114,7 +114,6 @@ const seedAttendance = async (users) => {
   for (const user of users) {
     for (const date of dates) {
       const exists = await Attendance.findOne({ userId: user._id, date });
-
       if (!exists) {
         await Attendance.create({
           userId:   user._id,
@@ -135,7 +134,7 @@ const seedAttendance = async (users) => {
 };
 
 /* ============================================================
-   SEED LEAVES
+   SEED LEAVES — with proper emergency + role-based flow
    ============================================================ */
 const seedLeaves = async (users) => {
   console.log("\n🌴  Seeding Leave Requests...");
@@ -146,14 +145,19 @@ const seedLeaves = async (users) => {
     return;
   }
 
+  const admin    = users.find((u) => u.role === "admin");
+  const manager  = users.find((u) => u.role === "manager");
+  const hr       = users.find((u) => u.role === "hr");
   const employee = users.find((u) => u.email === "employee@quibotech.com");
   const sara     = users.find((u) => u.email === "sara@quibotech.com");
   const david    = users.find((u) => u.email === "david@quibotech.com");
 
   const leaves = [
+    /* ── EMPLOYEE normal leave → starts at pending_manager ── */
     {
       userId:      employee._id,
       type:        "Sick Leave",
+      isEmergency: false,
       priority:    "high",
       startDate:   "2026-03-15",
       endDate:     "2026-03-16",
@@ -163,58 +167,147 @@ const seedLeaves = async (users) => {
       status:      "pending_manager",
       appliedAt:   new Date(),
     },
+
+    /* ── EMPLOYEE normal leave → already moved to pending_hr ── */
     {
-      userId:      sara._id,
-      type:        "Casual Leave",
-      priority:    "low",
-      startDate:   "2026-03-20",
-      endDate:     "2026-03-20",
-      days:        1,
-      reason:      "Personal work",
-      description: "Family function to attend",
-      status:      "pending_hr",
-      appliedAt:   new Date(),
+      userId:             employee._id,
+      type:               "Casual Leave",
+      isEmergency:        false,
+      priority:           "low",
+      startDate:          "2026-03-20",
+      endDate:            "2026-03-20",
+      days:               1,
+      reason:             "Personal work",
+      description:        "Family function to attend",
+      status:             "pending_hr",
+      approvedByManager:  manager._id,
+      appliedAt:          new Date(),
     },
+
+    /* ── EMPLOYEE normal leave → already moved to pending_admin ── */
+    {
+      userId:            sara._id,
+      type:              "Annual Leave",
+      isEmergency:       false,
+      priority:          "medium",
+      startDate:         "2026-04-01",
+      endDate:           "2026-04-05",
+      days:              5,
+      reason:            "Vacation",
+      description:       "Family trip planned",
+      status:            "pending_admin",
+      approvedByManager: manager._id,
+      approvedByHR:      hr._id,
+      appliedAt:         new Date(),
+    },
+
+    /* ── EMPLOYEE normal leave → fully approved by admin ── */
+    {
+      userId:            david._id,
+      type:              "Earned Leave",
+      isEmergency:       false,
+      priority:          "medium",
+      startDate:         "2026-04-10",
+      endDate:           "2026-04-12",
+      days:              3,
+      reason:            "Personal travel",
+      description:       "Attending wedding",
+      status:            "approved",
+      approvedByManager: manager._id,
+      approvedByHR:      hr._id,
+      approvedByAdmin:   admin._id,
+      appliedAt:         new Date(),
+    },
+
+    /* ── EMPLOYEE emergency leave → approved by manager only ── */
+    {
+      userId:            employee._id,
+      type:              "Emergency Leave",
+      isEmergency:       true,
+      priority:          "high",
+      startDate:         "2026-03-10",
+      endDate:           "2026-03-10",
+      days:              1,
+      reason:            "Family emergency",
+      description:       "Had to attend urgent family matter",
+      emergencyContact:  "+91 9900112233",
+      status:            "emergency_approved",
+      approvedByManager: manager._id,
+      appliedAt:         new Date(),
+    },
+
+    /* ── EMPLOYEE emergency leave → still pending with manager ── */
+    {
+      userId:           sara._id,
+      type:             "Emergency Leave",
+      isEmergency:      true,
+      priority:         "high",
+      startDate:        "2026-03-25",
+      endDate:          "2026-03-25",
+      days:             1,
+      reason:           "Medical emergency",
+      description:      "Hospitalisation of parent",
+      emergencyContact: "+91 9800223344",
+      status:           "pending_manager",
+      appliedAt:        new Date(),
+    },
+
+    /* ── REJECTED leave ── */
     {
       userId:      david._id,
-      type:        "Annual Leave",
-      priority:    "medium",
-      startDate:   "2026-04-01",
-      endDate:     "2026-04-05",
-      days:        5,
-      reason:      "Vacation",
-      description: "Family trip planned",
-      status:      "approved",
-      appliedAt:   new Date(),
-    },
-    {
-      userId:      employee._id,
-      type:        "Emergency Leave",
-      priority:    "high",
-      startDate:   "2026-03-10",
-      endDate:     "2026-03-10",
-      days:        1,
-      reason:      "Family emergency",
-      description: "Had to attend urgent family matter",
-      status:      "approved",
-      appliedAt:   new Date(),
-    },
-    {
-      userId:      sara._id,
       type:        "Sick Leave",
+      isEmergency: false,
       priority:    "medium",
       startDate:   "2026-03-05",
       endDate:     "2026-03-06",
       days:        2,
       reason:      "Migraine",
-      description: "Severe headache, could not work",
+      description: "Severe headache",
       status:      "rejected",
+      rejectedBy:  manager._id,
+      rejectedAt:  new Date(),
+      appliedAt:   new Date(),
+    },
+
+    /* ── MANAGER applying leave → goes straight to pending_admin ── */
+    {
+      userId:      manager._id,
+      type:        "Casual Leave",
+      isEmergency: false,
+      priority:    "low",
+      startDate:   "2026-04-15",
+      endDate:     "2026-04-16",
+      days:        2,
+      reason:      "Personal work",
+      description: "House renovation",
+      status:      "pending_admin",
+      appliedAt:   new Date(),
+    },
+
+    /* ── HR applying leave → goes straight to pending_admin ── */
+    {
+      userId:      hr._id,
+      type:        "Earned Leave",
+      isEmergency: false,
+      priority:    "medium",
+      startDate:   "2026-04-20",
+      endDate:     "2026-04-22",
+      days:        3,
+      reason:      "Vacation",
+      description: "Annual family vacation",
+      status:      "pending_admin",
       appliedAt:   new Date(),
     },
   ];
 
   await Leave.insertMany(leaves);
   console.log(`   ✅ Created ${leaves.length} leave records`);
+  console.log(`      → 2 pending_manager  (1 normal + 1 emergency)`);
+  console.log(`      → 1 pending_hr`);
+  console.log(`      → 3 pending_admin    (1 employee + 1 manager + 1 hr)`);
+  console.log(`      → 1 approved`);
+  console.log(`      → 1 emergency_approved`);
+  console.log(`      → 1 rejected`);
 };
 
 /* ============================================================
@@ -286,7 +379,7 @@ const seedTasks = async (users) => {
           status:      "in-progress",
           progress:    75,
           hoursWorked: 12,
-          note:        "Auth, attendance, leave APIs done. Working on payroll module",
+          note:        "Auth, attendance, leave APIs done. Working on payroll",
           blocker:     "Need clarification on payroll tax calculation",
         },
       ],
@@ -541,10 +634,10 @@ const seedInvoices = async (clients) => {
     return;
   }
 
-  const retailco  = clients.find((c) => c.company === "RetailCo Ltd");
-  const finbank   = clients.find((c) => c.company === "FinBank Solutions");
-  const logitech  = clients.find((c) => c.company === "LogiTech Corp");
-  const brandco   = clients.find((c) => c.company === "BrandCo Agency");
+  const retailco = clients.find((c) => c.company === "RetailCo Ltd");
+  const finbank  = clients.find((c) => c.company === "FinBank Solutions");
+  const logitech = clients.find((c) => c.company === "LogiTech Corp");
+  const brandco  = clients.find((c) => c.company === "BrandCo Agency");
 
   const invoices = [
     {
@@ -743,12 +836,12 @@ const seedDailyStatus = async (users) => {
       ],
     },
     {
-      userId:       sara._id,
-      date:         today,
-      status:       "In Progress",
-      achievements: "Completed admin dashboard layout with sidebar navigation",
-      blockers:     "Waiting for design approval on color scheme",
-      nextDayPlan:  "Work on employee dashboard and charts",
+      userId:          sara._id,
+      date:            today,
+      status:          "In Progress",
+      achievements:    "Completed admin dashboard layout with sidebar navigation",
+      blockers:        "Waiting for design approval on color scheme",
+      nextDayPlan:     "Work on employee dashboard and charts",
       managerComments: [],
     },
     {
@@ -767,21 +860,21 @@ const seedDailyStatus = async (users) => {
       ],
     },
     {
-      userId:       employee._id,
-      date:         yesterday,
-      status:       "Completed",
-      achievements: "Set up project structure, installed dependencies, configured environment",
-      blockers:     "None",
-      nextDayPlan:  "Start login page development",
+      userId:          employee._id,
+      date:            yesterday,
+      status:          "Completed",
+      achievements:    "Set up project structure and configured environment",
+      blockers:        "None",
+      nextDayPlan:     "Start login page development",
       managerComments: [],
     },
     {
-      userId:       sara._id,
-      date:         yesterday,
-      status:       "On Track",
-      achievements: "Created wireframes and component structure for dashboard",
-      blockers:     "None",
-      nextDayPlan:  "Start implementing dashboard layout",
+      userId:          sara._id,
+      date:            yesterday,
+      status:          "On Track",
+      achievements:    "Created wireframes and component structure for dashboard",
+      blockers:        "None",
+      nextDayPlan:     "Start implementing dashboard layout",
       managerComments: [],
     },
   ];
@@ -811,62 +904,14 @@ const seedTimesheets = async (users) => {
   const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0];
 
   const timesheets = [
-    {
-      employeeId:   employee._id,
-      employeeName: employee.name,
-      hours:        8,
-      date:         today,
-      status:       "pending",
-    },
-    {
-      employeeId:   sara._id,
-      employeeName: sara.name,
-      hours:        7.5,
-      date:         today,
-      status:       "pending",
-    },
-    {
-      employeeId:   david._id,
-      employeeName: david.name,
-      hours:        9,
-      date:         today,
-      status:       "pending",
-    },
-    {
-      employeeId:   employee._id,
-      employeeName: employee.name,
-      hours:        8,
-      date:         yesterday,
-      status:       "approved",
-    },
-    {
-      employeeId:   sara._id,
-      employeeName: sara.name,
-      hours:        8,
-      date:         yesterday,
-      status:       "approved",
-    },
-    {
-      employeeId:   david._id,
-      employeeName: david.name,
-      hours:        8.5,
-      date:         yesterday,
-      status:       "approved",
-    },
-    {
-      employeeId:   employee._id,
-      employeeName: employee.name,
-      hours:        7,
-      date:         twoDaysAgo,
-      status:       "rejected",
-    },
-    {
-      employeeId:   sara._id,
-      employeeName: sara.name,
-      hours:        8,
-      date:         twoDaysAgo,
-      status:       "approved",
-    },
+    { employeeId: employee._id, employeeName: employee.name, hours: 8,   date: today,      status: "pending"  },
+    { employeeId: sara._id,     employeeName: sara.name,     hours: 7.5, date: today,      status: "pending"  },
+    { employeeId: david._id,    employeeName: david.name,    hours: 9,   date: today,      status: "pending"  },
+    { employeeId: employee._id, employeeName: employee.name, hours: 8,   date: yesterday,  status: "approved" },
+    { employeeId: sara._id,     employeeName: sara.name,     hours: 8,   date: yesterday,  status: "approved" },
+    { employeeId: david._id,    employeeName: david.name,    hours: 8.5, date: yesterday,  status: "approved" },
+    { employeeId: employee._id, employeeName: employee.name, hours: 7,   date: twoDaysAgo, status: "rejected" },
+    { employeeId: sara._id,     employeeName: sara.name,     hours: 8,   date: twoDaysAgo, status: "approved" },
   ];
 
   await Timesheet.insertMany(timesheets);
@@ -1029,17 +1074,15 @@ const seed = async () => {
     console.log("🌱  HRMS DATABASE SEED STARTED");
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    // Connect to MongoDB
     await connectDB();
 
-    // Run all seed functions in order
-    const users     = await seedUsers();
+    const users   = await seedUsers();
     await seedAttendance(users);
     await seedLeaves(users);
     await seedTasks(users);
     await seedProjects(users);
     await seedPayroll(users);
-    const clients   = await seedClients();
+    const clients = await seedClients();
     await seedInvoices(clients);
     await seedCalendarEvents(users);
     await seedDailyStatus(users);
@@ -1050,7 +1093,6 @@ const seed = async () => {
     console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("🎉  ALL DATA SEEDED SUCCESSFULLY INTO MONGODB!");
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
     console.log("\n📋  LOGIN CREDENTIALS:");
     console.log("   Admin    → admin@quibotech.com    / admin123");
     console.log("   HR       → hr@quibotech.com       / hr123456");
@@ -1058,6 +1100,11 @@ const seed = async () => {
     console.log("   Employee → employee@quibotech.com / employee123");
     console.log("   Sara     → sara@quibotech.com     / sara123456");
     console.log("   David    → david@quibotech.com    / david123456");
+    console.log("\n📋  LEAVE FLOW TEST DATA:");
+    console.log("   Login as Manager  → see pending_manager leaves (approve → goes to HR)");
+    console.log("   Login as HR       → see pending_hr leaves (approve → goes to Admin)");
+    console.log("   Login as Admin    → see pending_admin leaves (approve → FINAL)");
+    console.log("   Emergency leaves  → Manager approves → emergency_approved (Admin never sees it)");
     console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
     process.exit(0);
@@ -1068,7 +1115,4 @@ const seed = async () => {
   }
 };
 
-/* ============================================================
-   RUN SEED
-   ============================================================ */
 seed();
