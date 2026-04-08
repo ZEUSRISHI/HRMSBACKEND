@@ -21,11 +21,25 @@ const freelancerRoutes  = require("./routes/freelancerRoutes");
 const app = express();
 
 /* ============================================================
-   CORS
+   ✅ CORS (FIXED FOR LOCAL + NETLIFY)
    ============================================================ */
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://hrmspage.netlify.app"
+];
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: function (origin, callback) {
+      // allow requests with no origin (like mobile apps, Postman)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS blocked: ${origin}`));
+      }
+    },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -113,7 +127,7 @@ app.get("/", (req, res) => {
     success: true,
     message: "Welcome to Quibo Tech HRMS API",
     version: "1.0.0",
-    docs: "http://localhost:5000/api/health",
+    docs: "https://your-render-url/api/health", // 🔥 update after deploy
   });
 });
 
@@ -135,6 +149,13 @@ app.use((err, req, res, next) => {
   console.error("❌ Error:", err.message);
   console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
+  if (err.message && err.message.includes("CORS")) {
+    return res.status(403).json({
+      success: false,
+      message: err.message,
+    });
+  }
+
   // Mongoose validation error
   if (err.name === "ValidationError") {
     const messages = Object.values(err.errors).map((e) => e.message);
@@ -145,7 +166,7 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Mongoose duplicate key error
+  // Duplicate key
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue)[0];
     return res.status(409).json({
@@ -169,7 +190,7 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Mongoose cast error (invalid ObjectId)
+  // Invalid ObjectId
   if (err.name === "CastError") {
     return res.status(400).json({
       success: false,
@@ -177,7 +198,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Default server error
   res.status(err.statusCode || 500).json({
     success: false,
     message: err.message || "Internal Server Error",
