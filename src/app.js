@@ -26,7 +26,7 @@ const app = express();
    ============================================================ */
 const allowedOrigins = [
   "http://localhost:5173",
-  "https://hrmspage.netlify.app"
+  "https://hrmspage1.netlify.app"
 ];
 
 app.use(
