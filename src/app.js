@@ -17,6 +17,7 @@ const dailyStatusRoutes = require("./routes/dailyStatusRoutes");
 const timesheetRoutes   = require("./routes/timesheetRoutes");
 const vendorRoutes      = require("./routes/vendorRoutes");
 const freelancerRoutes  = require("./routes/freelancerRoutes");
+const onboardingRoutes  = require("./routes/onboardingRoutes");
 
 const app = express();
 
@@ -104,6 +105,7 @@ app.use("/api/daily-status", dailyStatusRoutes);
 app.use("/api/timesheets",   timesheetRoutes);
 app.use("/api/vendors",      vendorRoutes);
 app.use("/api/freelancers",  freelancerRoutes);
+app.use("/api/onboarding",   onboardingRoutes);
 
 /* ============================================================
    HEALTH CHECK
@@ -127,7 +129,7 @@ app.get("/", (req, res) => {
     success: true,
     message: "Welcome to Quibo Tech HRMS API",
     version: "1.0.0",
-    docs: "https://your-render-url/api/health", // 🔥 update after deploy
+    docs: "https://your-render-url/api/health",
   });
 });
 
