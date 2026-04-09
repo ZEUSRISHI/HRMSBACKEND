@@ -1,74 +1,68 @@
 const Leave = require("../models/Leave");
-const User  = require("../models/User");
 
 /* ============================================================
-   APPLY LEAVE
+   APPROVAL FLOW RULES
+   ─────────────────────────────────────────────────────────────
+   Employee (normal)   → pending_hr → pending_manager → pending_admin
+   Employee (emergency)→ pending_manager  (manager approves = done)
+   HR                  → pending_admin
+   Manager             → pending_admin
+   ============================================================ */
+
+const initialStatus = (applicantRole, isEmergency) => {
+  if (applicantRole === "hr")      return "pending_admin";
+  if (applicantRole === "manager") return "pending_admin";
+  if (applicantRole === "employee" && isEmergency) return "pending_manager";
+  return "pending_hr";
+};
+
+const nextStatus = (currentStatus, isEmergency) => {
+  if (currentStatus === "pending_hr")      return "pending_manager";
+  if (currentStatus === "pending_manager") return isEmergency ? "emergency_approved" : "pending_admin";
+  if (currentStatus === "pending_admin")   return "approved";
+  return "approved";
+};
+
+const canApprove = (actorRole, leave) => {
+  if (actorRole === "hr"      && leave.status === "pending_hr")      return true;
+  if (actorRole === "manager" && leave.status === "pending_manager") return true;
+  if (actorRole === "admin"   && leave.status === "pending_admin")   return true;
+  return false;
+};
+
+/* ============================================================
+   APPLY FOR LEAVE
    POST /api/leaves/apply
    ============================================================ */
 const applyLeave = async (req, res) => {
   try {
     const {
-      type,
-      isEmergency,
-      priority,
-      startDate,
-      endDate,
-      reason,
-      description,
-      emergencyContact,
+      type, isEmergency, priority,
+      startDate, endDate, reason, description, emergencyContact,
     } = req.body;
 
-    if (!type || !startDate || !endDate || !reason) {
-      return res.status(400).json({
-        success: false,
-        message: "type, startDate, endDate and reason are required.",
-      });
-    }
+    const applicantRole = req.user.role;
+    const status = initialStatus(applicantRole, isEmergency);
 
-    const days =
-      Math.ceil(
-        (new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)
-      ) + 1;
-
-    const role = req.user.role;
-
-    let initialStatus;
-
-    if (isEmergency) {
-      // Emergency leave always starts at pending_manager regardless of role
-      initialStatus = "pending_manager";
-    } else if (role === "employee") {
-      // Employee: manager → hr → admin
-      initialStatus = "pending_manager";
-    } else {
-      // Manager or HR applying: goes straight to admin
-      initialStatus = "pending_admin";
-    }
+    const start = new Date(startDate);
+    const end   = new Date(endDate);
+    const days  = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1);
 
     const leave = await Leave.create({
-      userId:           req.user._id,
+      userId: req.user._id,
       type,
-      isEmergency:      !!isEmergency,
-      priority:         priority || "medium",
+      isEmergency: !!isEmergency,
+      priority: priority || "medium",
       startDate,
       endDate,
       days,
       reason,
-      description:      description || "",
-      emergencyContact: emergencyContact || "",
-      status:           initialStatus,
+      description,
+      emergencyContact,
+      status,
     });
 
-    const populated = await Leave.findById(leave._id).populate(
-      "userId",
-      "name email role"
-    );
-
-    res.status(201).json({
-      success: true,
-      message: "Leave request submitted successfully.",
-      leave:   populated,
-    });
+    res.status(201).json({ success: true, message: "Leave request submitted.", leave });
   } catch (err) {
     console.error("applyLeave error:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -76,168 +70,25 @@ const applyLeave = async (req, res) => {
 };
 
 /* ============================================================
-   GET MY LEAVES (logged-in user's own leaves)
-   GET /api/leaves/my
-   ============================================================ */
-const getMyLeaves = async (req, res) => {
-  try {
-    const leaves = await Leave.find({ userId: req.user._id })
-      .populate("userId", "name email role")
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({ success: true, total: leaves.length, leaves });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-/* ============================================================
-   GET PENDING LEAVES (role-based queue)
-   GET /api/leaves/pending
-
-   Manager  → sees: pending_manager (non-emergency + emergency)
-   HR       → sees: pending_hr
-   Admin    → sees: pending_admin + all non-emergency approved/rejected
-             (Admin does NOT see emergency leaves)
-   ============================================================ */
-const getPendingLeaves = async (req, res) => {
-  try {
-    const role = req.user.role;
-    let query  = {};
-
-    if (role === "manager") {
-      query = { status: "pending_manager" };
-    } else if (role === "hr") {
-      query = { status: "pending_hr" };
-    } else if (role === "admin") {
-      // Admin sees pending_admin queue only
-      // Emergency leaves NEVER reach admin
-      query = {
-        status:      "pending_admin",
-        isEmergency: false,
-      };
-    }
-
-    const leaves = await Leave.find(query)
-      .populate("userId", "name email role department")
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({ success: true, total: leaves.length, leaves });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-/* ============================================================
-   GET ALL LEAVES
-   GET /api/leaves/all
-
-   Admin → ALL leaves (including approved/rejected) EXCEPT emergency
-   HR    → ALL non-emergency leaves
-   ============================================================ */
-const getAllLeaves = async (req, res) => {
-  try {
-    const role  = req.user.role;
-    let   query = {};
-
-    if (role === "admin") {
-      // Admin sees every leave EXCEPT emergency ones that are still at manager stage
-      // (emergency leaves that are approved/rejected by manager are also visible)
-      query = {
-        $or: [
-          { isEmergency: false },
-          {
-            isEmergency: true,
-            status: { $in: ["emergency_approved", "rejected"] },
-          },
-        ],
-      };
-    } else if (role === "hr") {
-      // HR sees all non-emergency leaves
-      query = { isEmergency: false };
-    }
-
-    const leaves = await Leave.find(query)
-      .populate("userId", "name email role department")
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({ success: true, total: leaves.length, leaves });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-/* ============================================================
    APPROVE LEAVE
    PUT /api/leaves/:id/approve
-
-   Manager approving:
-     - Emergency → emergency_approved (FINAL — does not go to admin)
-     - Normal    → pending_hr
-
-   HR approving:
-     - Normal    → pending_admin
-
-   Admin approving:
-     - Normal    → approved (FINAL)
    ============================================================ */
 const approveLeave = async (req, res) => {
   try {
     const leave = await Leave.findById(req.params.id);
+    if (!leave) return res.status(404).json({ success: false, message: "Leave not found." });
 
-    if (!leave) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Leave not found." });
-    }
-
-    const role = req.user.role;
-
-    // Validate that this role is allowed to act on current status
-    const validAction =
-      (role === "manager" && leave.status === "pending_manager") ||
-      (role === "hr"      && leave.status === "pending_hr")      ||
-      (role === "admin"   && leave.status === "pending_admin");
-
-    if (!validAction) {
+    if (!canApprove(req.user.role, leave)) {
       return res.status(403).json({
         success: false,
-        message: `You cannot approve a leave with status '${leave.status}'.`,
+        message: `You (${req.user.role}) cannot approve a leave in status "${leave.status}".`,
       });
     }
 
-    if (role === "manager") {
-      if (leave.isEmergency) {
-        // Emergency leave approved by manager → FINAL
-        leave.status           = "emergency_approved";
-        leave.approvedByManager = req.user._id;
-      } else {
-        // Normal leave → escalate to HR
-        leave.status           = "pending_hr";
-        leave.approvedByManager = req.user._id;
-      }
-    } else if (role === "hr") {
-      // Escalate to admin
-      leave.status       = "pending_admin";
-      leave.approvedByHR  = req.user._id;
-    } else if (role === "admin") {
-      // Final approval
-      leave.status           = "approved";
-      leave.approvedByAdmin   = req.user._id;
-    }
-
+    leave.status = nextStatus(leave.status, leave.isEmergency);
     await leave.save();
 
-    const populated = await Leave.findById(leave._id).populate(
-      "userId",
-      "name email role"
-    );
-
-    res.status(200).json({
-      success: true,
-      message: "Leave approved successfully.",
-      leave:   populated,
-    });
+    res.status(200).json({ success: true, message: "Leave approved.", leave });
   } catch (err) {
     console.error("approveLeave error:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -251,57 +102,90 @@ const approveLeave = async (req, res) => {
 const rejectLeave = async (req, res) => {
   try {
     const leave = await Leave.findById(req.params.id);
+    if (!leave) return res.status(404).json({ success: false, message: "Leave not found." });
 
-    if (!leave) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Leave not found." });
-    }
-
-    const role = req.user.role;
-
-    const validAction =
-      (role === "manager" && leave.status === "pending_manager") ||
-      (role === "hr"      && leave.status === "pending_hr")      ||
-      (role === "admin"   && leave.status === "pending_admin");
-
-    if (!validAction) {
+    if (!canApprove(req.user.role, leave)) {
       return res.status(403).json({
         success: false,
-        message: `You cannot reject a leave with status '${leave.status}'.`,
+        message: `You (${req.user.role}) cannot reject a leave in status "${leave.status}".`,
       });
     }
 
-    leave.status           = "rejected";
-    leave.rejectedBy        = req.user._id;
-    leave.rejectedAt        = new Date();
-    leave.rejectionReason   = req.body.reason || "";
-
+    leave.status = "rejected";
     await leave.save();
 
-    const populated = await Leave.findById(leave._id).populate(
-      "userId",
-      "name email role"
-    );
-
-    res.status(200).json({
-      success: true,
-      message: "Leave rejected.",
-      leave:   populated,
-    });
+    res.status(200).json({ success: true, message: "Leave rejected.", leave });
   } catch (err) {
+    console.error("rejectLeave error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
 /* ============================================================
-   EXPORTS
+   GET MY LEAVES
+   GET /api/leaves/my
    ============================================================ */
+const getMyLeaves = async (req, res) => {
+  try {
+    const leaves = await Leave.find({ userId: req.user._id }).sort({ createdAt: -1 });
+    res.status(200).json({ success: true, leaves });
+  } catch (err) {
+    console.error("getMyLeaves error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
+   GET PENDING LEAVES FOR CURRENT ROLE
+   GET /api/leaves/pending
+   ─────────────────────────────────────────────────────────────
+   HR      → pending_hr
+   Manager → pending_manager
+   Admin   → pending_admin
+   ============================================================ */
+const getPendingLeaves = async (req, res) => {
+  try {
+    const role = req.user.role;
+    let statusFilter;
+
+    if (role === "hr")           statusFilter = "pending_hr";
+    else if (role === "manager") statusFilter = "pending_manager";
+    else if (role === "admin")   statusFilter = "pending_admin";
+    else return res.status(403).json({ success: false, message: "Not authorized." });
+
+    const leaves = await Leave.find({ status: statusFilter })
+      .populate("userId", "name email role department")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ success: true, leaves });
+  } catch (err) {
+    console.error("getPendingLeaves error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
+   GET ALL LEAVES  (Admin only)
+   GET /api/leaves/all
+   ============================================================ */
+const getAllLeaves = async (req, res) => {
+  try {
+    const leaves = await Leave.find()
+      .populate("userId", "name email role department")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ success: true, leaves });
+  } catch (err) {
+    console.error("getAllLeaves error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 module.exports = {
   applyLeave,
+  approveLeave,
+  rejectLeave,
   getMyLeaves,
   getPendingLeaves,
   getAllLeaves,
-  approveLeave,
-  rejectLeave,
 };
