@@ -5,37 +5,22 @@ const { protect, authorize } = require("../middleware/auth");
 
 router.use(protect);
 
-// Any logged-in user can apply
 router.post("/apply", leaveController.applyLeave);
+router.get("/my",     leaveController.getMyLeaves);
 
-// Own leaves
-router.get("/my", leaveController.getMyLeaves);
-
-// Role-based pending queue
 router.get(
   "/pending",
-  authorize("admin", "hr", "manager"),
-  leaveController.getPendingLeaves
+  authorize("hr", "manager", "admin"),
+  leaveController.getPendingLeaves,
 );
 
-// Full leave list (admin + hr)
 router.get(
   "/all",
-  authorize("admin", "hr"),
-  leaveController.getAllLeaves
+  authorize("admin"),
+  leaveController.getAllLeaves,
 );
 
-// Approve / reject
-router.put(
-  "/:id/approve",
-  authorize("admin", "hr", "manager"),
-  leaveController.approveLeave
-);
-
-router.put(
-  "/:id/reject",
-  authorize("admin", "hr", "manager"),
-  leaveController.rejectLeave
-);
+router.put("/:id/approve", authorize("hr", "manager", "admin"), leaveController.approveLeave);
+router.put("/:id/reject",  authorize("hr", "manager", "admin"), leaveController.rejectLeave);
 
 module.exports = router;
