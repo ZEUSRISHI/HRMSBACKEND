@@ -1,37 +1,14 @@
 require("dotenv").config();
 const app = require("./app");
 const connectDB = require("../config/db");
-const cors = require("cors");
+
+// ✅ NO cors import or app.use(cors()) here — handled entirely in app.js
 
 const PORT = process.env.PORT || 5000;
 
 /* ============================================================
-   🌐 CORS CONFIG (FIXED)
-   ============================================================ */
-
-const allowedOrigins = [
-  "https://hrmsquibo.netlify.app"
-];
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // allow requests with no origin (Postman / mobile apps)
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("❌ CORS not allowed: " + origin));
-    }
-  },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  credentials: true
-}));
-
-/* ============================================================
    START SERVER
    ============================================================ */
-
 const startServer = async () => {
   try {
     await connectDB();
@@ -173,7 +150,6 @@ const startServer = async () => {
 /* ============================================================
    GLOBAL ERROR HANDLING
    ============================================================ */
-
 process.on("unhandledRejection", (err) => {
   console.error("❌ Unhandled Promise Rejection:", err.message);
   process.exit(1);
