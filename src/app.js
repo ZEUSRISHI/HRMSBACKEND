@@ -18,30 +18,31 @@ const timesheetRoutes   = require("./routes/timesheetRoutes");
 const vendorRoutes      = require("./routes/vendorRoutes");
 const freelancerRoutes  = require("./routes/freelancerRoutes");
 const onboardingRoutes  = require("./routes/onboardingRoutes");
-
-// ✅ ADDED
 const helpdeskRoutes    = require("./routes/helpdeskRoutes");
 
 const app = express();
 
 /* ============================================================
-   ✅ CORS (FIXED FOR LOCAL + NETLIFY)
+   CORS
    ============================================================ */
 const allowedOrigins = [
   "http://localhost:5173",
-  "https://hrmspage1.netlify.app"
+  "http://localhost:3000",
+  "https://hrmsquibo.netlify.app",   // ✅ your real frontend
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
+      // allow requests with no origin (Postman, mobile apps, server-to-server)
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS blocked: ${origin}`));
+        return callback(null, true);
       }
+
+      console.warn("⚠️  CORS blocked origin:", origin);
+      return callback(new Error(`CORS blocked: ${origin}`));
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -108,8 +109,6 @@ app.use("/api/timesheets",   timesheetRoutes);
 app.use("/api/vendors",      vendorRoutes);
 app.use("/api/freelancers",  freelancerRoutes);
 app.use("/api/onboarding",   onboardingRoutes);
-
-// ✅ ADDED ROUTE
 app.use("/api/helpdesk",     helpdeskRoutes);
 
 /* ============================================================
@@ -134,7 +133,7 @@ app.get("/", (req, res) => {
     success: true,
     message: "Welcome to Quibo Tech HRMS API",
     version: "1.0.0",
-    docs: "https://your-render-url/api/health",
+    docs: "https://h-y993.onrender.com/api/health",
   });
 });
 
