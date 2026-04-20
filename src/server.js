@@ -122,6 +122,21 @@ const startServer = async () => {
       console.log("   PUT    /api/freelancers/:id");
       console.log("   DELETE /api/freelancers/:id");
 
+      /* ============================================================
+         🎫 HELPDESK (✅ ADDED)
+         ============================================================ */
+      console.log("\n🎫  HELPDESK");
+      console.log("   POST   /api/helpdesk");
+      console.log("   GET    /api/helpdesk/my");
+      console.log("   GET    /api/helpdesk/all");
+      console.log("   GET    /api/helpdesk/stats");
+      console.log("   GET    /api/helpdesk/:id");
+      console.log("   PUT    /api/helpdesk/:id");
+      console.log("   PATCH  /api/helpdesk/:id/edit");
+      console.log("   DELETE /api/helpdesk/:id");
+      console.log("   POST   /api/helpdesk/:id/comments");
+      console.log("   DELETE /api/helpdesk/:id/comments/:commentId");
+
       console.log("\n❤️   HEALTH");
       console.log("   GET    /api/health");
 
