@@ -19,6 +19,9 @@ const vendorRoutes      = require("./routes/vendorRoutes");
 const freelancerRoutes  = require("./routes/freelancerRoutes");
 const onboardingRoutes  = require("./routes/onboardingRoutes");
 
+// ✅ ADDED
+const helpdeskRoutes    = require("./routes/helpdeskRoutes");
+
 const app = express();
 
 /* ============================================================
@@ -32,7 +35,6 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // allow requests with no origin (like mobile apps, Postman)
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
@@ -107,6 +109,9 @@ app.use("/api/vendors",      vendorRoutes);
 app.use("/api/freelancers",  freelancerRoutes);
 app.use("/api/onboarding",   onboardingRoutes);
 
+// ✅ ADDED ROUTE
+app.use("/api/helpdesk",     helpdeskRoutes);
+
 /* ============================================================
    HEALTH CHECK
    ============================================================ */
@@ -158,7 +163,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Mongoose validation error
   if (err.name === "ValidationError") {
     const messages = Object.values(err.errors).map((e) => e.message);
     return res.status(422).json({
@@ -168,7 +172,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Duplicate key
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue)[0];
     return res.status(409).json({
@@ -177,7 +180,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // JWT errors
   if (err.name === "JsonWebTokenError") {
     return res.status(401).json({
       success: false,
@@ -192,7 +194,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Invalid ObjectId
   if (err.name === "CastError") {
     return res.status(400).json({
       success: false,
