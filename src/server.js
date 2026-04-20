@@ -1,18 +1,41 @@
 require("dotenv").config();
 const app = require("./app");
 const connectDB = require("../config/db");
+const cors = require("cors");
 
 const PORT = process.env.PORT || 5000;
 
 /* ============================================================
+   🌐 CORS CONFIG (FIXED)
+   ============================================================ */
+
+const allowedOrigins = [
+  "https://hrmspage.netlify.app"
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // allow requests with no origin (Postman / mobile apps)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("❌ CORS not allowed: " + origin));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  credentials: true
+}));
+
+/* ============================================================
    START SERVER
    ============================================================ */
+
 const startServer = async () => {
   try {
-    // Connect to MongoDB first
     await connectDB();
 
-    // Then start Express
     app.listen(PORT, () => {
       console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
       console.log("🚀  HRMS Backend Server Started");
@@ -21,6 +44,7 @@ const startServer = async () => {
       console.log(`🌍  Environment : ${process.env.NODE_ENV || "development"}`);
       console.log(`🗄️   Database    : ${process.env.MONGO_URI}`);
       console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
       console.log("\n📋  ALL API ENDPOINTS");
       console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
@@ -122,9 +146,6 @@ const startServer = async () => {
       console.log("   PUT    /api/freelancers/:id");
       console.log("   DELETE /api/freelancers/:id");
 
-      /* ============================================================
-         🎫 HELPDESK (✅ ADDED)
-         ============================================================ */
       console.log("\n🎫  HELPDESK");
       console.log("   POST   /api/helpdesk");
       console.log("   GET    /api/helpdesk/my");
@@ -142,6 +163,7 @@ const startServer = async () => {
 
       console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
     });
+
   } catch (error) {
     console.error("❌ Failed to start server:", error.message);
     process.exit(1);
@@ -149,16 +171,14 @@ const startServer = async () => {
 };
 
 /* ============================================================
-   HANDLE UNHANDLED PROMISE REJECTIONS
+   GLOBAL ERROR HANDLING
    ============================================================ */
+
 process.on("unhandledRejection", (err) => {
   console.error("❌ Unhandled Promise Rejection:", err.message);
   process.exit(1);
 });
 
-/* ============================================================
-   HANDLE UNCAUGHT EXCEPTIONS
-   ============================================================ */
 process.on("uncaughtException", (err) => {
   console.error("❌ Uncaught Exception:", err.message);
   process.exit(1);
