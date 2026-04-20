@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 5000;
    ============================================================ */
 
 const allowedOrigins = [
-  "https://hrmspage.netlify.app"
+  "https://hrmsquibo.netlify.app"
 ];
 
 app.use(cors({
