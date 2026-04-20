@@ -28,7 +28,7 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  "https://hrmsquibo.netlify.app",   // ✅ your real frontend
+  "https://elegant-pegasus-a8e5ed.netlify.app",   // ✅ your real frontend
 ];
 
 app.use(
