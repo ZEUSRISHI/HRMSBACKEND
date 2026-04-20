@@ -133,7 +133,7 @@ app.get("/", (req, res) => {
     success: true,
     message: "Welcome to Quibo Tech HRMS API",
     version: "1.0.0",
-    docs: "https://h-y993.onrender.com/api/health",
+    docs: "https://hrmsbackends.onrender.com/api/health",
   });
 });
 
