@@ -1,12 +1,13 @@
+// controllers/leaveController.js
 const Leave = require("../models/Leave");
 
 /* ============================================================
    APPROVAL FLOW RULES
    ─────────────────────────────────────────────────────────────
-   Employee (normal)   → pending_hr → pending_manager → pending_admin
-   Employee (emergency)→ pending_manager  (manager approves = done)
-   HR                  → pending_admin
-   Manager             → pending_admin
+   Employee (normal)    → pending_hr → pending_manager → pending_admin → approved
+   Employee (emergency) → pending_manager → emergency_approved
+   HR                   → pending_admin → approved
+   Manager              → pending_admin → approved
    ============================================================ */
 
 const initialStatus = (applicantRole, isEmergency) => {
@@ -60,6 +61,7 @@ const applyLeave = async (req, res) => {
       description,
       emergencyContact,
       status,
+      source: "api",
     });
 
     res.status(201).json({ success: true, message: "Leave request submitted.", leave });
@@ -76,7 +78,9 @@ const applyLeave = async (req, res) => {
 const approveLeave = async (req, res) => {
   try {
     const leave = await Leave.findById(req.params.id);
-    if (!leave) return res.status(404).json({ success: false, message: "Leave not found." });
+    if (!leave) {
+      return res.status(404).json({ success: false, message: "Leave not found." });
+    }
 
     if (!canApprove(req.user.role, leave)) {
       return res.status(403).json({
@@ -84,6 +88,11 @@ const approveLeave = async (req, res) => {
         message: `You (${req.user.role}) cannot approve a leave in status "${leave.status}".`,
       });
     }
+
+    // Track approver at each stage
+    if (req.user.role === "hr")      leave.approvedByHR      = req.user._id;
+    if (req.user.role === "manager") leave.approvedByManager = req.user._id;
+    if (req.user.role === "admin")   leave.approvedByAdmin   = req.user._id;
 
     leave.status = nextStatus(leave.status, leave.isEmergency);
     await leave.save();
@@ -102,7 +111,9 @@ const approveLeave = async (req, res) => {
 const rejectLeave = async (req, res) => {
   try {
     const leave = await Leave.findById(req.params.id);
-    if (!leave) return res.status(404).json({ success: false, message: "Leave not found." });
+    if (!leave) {
+      return res.status(404).json({ success: false, message: "Leave not found." });
+    }
 
     if (!canApprove(req.user.role, leave)) {
       return res.status(403).json({
@@ -111,7 +122,10 @@ const rejectLeave = async (req, res) => {
       });
     }
 
-    leave.status = "rejected";
+    leave.status      = "rejected";
+    leave.rejectedBy  = req.user._id;
+    leave.rejectedAt  = new Date();
+    leave.rejectionReason = req.body.rejectionReason || "";
     await leave.save();
 
     res.status(200).json({ success: true, message: "Leave rejected.", leave });
@@ -181,6 +195,86 @@ const getAllLeaves = async (req, res) => {
   }
 };
 
+/* ============================================================
+   MANUAL LEAVE ENTRY  (Admin only)
+   POST /api/leaves/manual
+   Body: { employeeName, type, startDate, endDate, reason, status, priority }
+   Saves the record directly to DB — no approval flow needed.
+   ============================================================ */
+const addManualLeave = async (req, res) => {
+  try {
+    const {
+      employeeName,
+      type,
+      startDate,
+      endDate,
+      reason,
+      status,
+      priority,
+    } = req.body;
+
+    // ── validation ──
+    if (!employeeName || !employeeName.trim()) {
+      return res.status(400).json({ success: false, message: "Employee name is required." });
+    }
+    if (!type) {
+      return res.status(400).json({ success: false, message: "Leave type is required." });
+    }
+    if (!startDate || !endDate) {
+      return res.status(400).json({ success: false, message: "Start date and end date are required." });
+    }
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ success: false, message: "Reason is required." });
+    }
+
+    // Only previous dates allowed
+    const today = new Date().toISOString().split("T")[0];
+    if (endDate >= today) {
+      return res.status(400).json({
+        success: false,
+        message: "Manual leave entry is only allowed for previous dates.",
+      });
+    }
+    if (startDate > endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date cannot be after end date.",
+      });
+    }
+
+    const start = new Date(startDate);
+    const end   = new Date(endDate);
+    const days  = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+    const leave = await Leave.create({
+      employeeName: employeeName.trim(),
+      type,
+      startDate,
+      endDate,
+      days,
+      reason:    reason.trim(),
+      status:    status   || "approved",
+      priority:  priority || "medium",
+      source:    "manual",
+      enteredBy: req.user?.name ?? "Admin",
+      enteredAt: new Date(),
+      // userId intentionally omitted — manual entry has no linked User doc
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Manual leave record saved.",
+      leave,
+    });
+  } catch (err) {
+    console.error("addManualLeave error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
+   EXPORTS
+   ============================================================ */
 module.exports = {
   applyLeave,
   approveLeave,
@@ -188,4 +282,5 @@ module.exports = {
   getMyLeaves,
   getPendingLeaves,
   getAllLeaves,
+  addManualLeave,
 };
