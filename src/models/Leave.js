@@ -1,3 +1,4 @@
+// models/Leave.js
 const mongoose = require("mongoose");
 
 const leaveSchema = new mongoose.Schema(
@@ -5,9 +6,29 @@ const leaveSchema = new mongoose.Schema(
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: false, // false so manual entries (no User doc) are allowed
     },
 
+    // ── Manual-entry fields ──
+    employeeName: {
+      type: String,
+      default: "",
+    },
+    source: {
+      type: String,
+      enum: ["api", "manual"],
+      default: "api",
+    },
+    enteredBy: {
+      type: String,
+      default: "",
+    },
+    enteredAt: {
+      type: Date,
+      default: null,
+    },
+
+    // ── Standard leave fields ──
     type: {
       type: String,
       required: true,
@@ -58,27 +79,29 @@ const leaveSchema = new mongoose.Schema(
       Status Flow:
       ─────────────────────────────────────────────────────
       EMPLOYEE applies:
-        → pending_manager → pending_hr → pending_admin → approved / rejected
+        → pending_hr → pending_manager → pending_admin → approved / rejected
 
       MANAGER / HR applies:
         → pending_admin → approved / rejected
 
-      EMERGENCY leave (any role):
+      EMERGENCY leave (employee):
         → pending_manager → emergency_approved / rejected
-        (Never escalates beyond manager — admin does NOT see it)
+
+      MANUAL entry (admin):
+        → status set directly (approved / rejected / pending_admin)
       ─────────────────────────────────────────────────────
     */
     status: {
       type: String,
       enum: [
-        "pending_manager",
         "pending_hr",
+        "pending_manager",
         "pending_admin",
         "approved",
         "rejected",
         "emergency_approved",
       ],
-      default: "pending_manager",
+      default: "pending_hr",
     },
 
     appliedAt: {
