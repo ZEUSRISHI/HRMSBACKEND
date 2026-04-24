@@ -1,3 +1,4 @@
+// routes/leaveRoutes.js
 const express = require("express");
 const router  = express.Router();
 const leaveController = require("../controllers/leaveController");
@@ -5,22 +6,29 @@ const { protect, authorize } = require("../middleware/auth");
 
 router.use(protect);
 
+// Employee / all roles
 router.post("/apply", leaveController.applyLeave);
 router.get("/my",     leaveController.getMyLeaves);
 
+// HR, Manager, Admin
 router.get(
   "/pending",
   authorize("hr", "manager", "admin"),
   leaveController.getPendingLeaves,
 );
 
+// Admin only
 router.get(
   "/all",
   authorize("admin"),
   leaveController.getAllLeaves,
 );
 
+// Approve / Reject — HR, Manager, Admin
 router.put("/:id/approve", authorize("hr", "manager", "admin"), leaveController.approveLeave);
 router.put("/:id/reject",  authorize("hr", "manager", "admin"), leaveController.rejectLeave);
+
+// Manual past-date entry — Admin only
+router.post("/manual", authorize("admin"), leaveController.addManualLeave);
 
 module.exports = router;
