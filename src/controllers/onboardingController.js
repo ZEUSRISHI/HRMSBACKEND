@@ -15,8 +15,7 @@ const STARTUP_TASKS = [
 ];
 
 /* ============================================================
-   ONBOARDING — CREATE
-   Admin / HR creates a new employee account + onboarding track
+   ONBOARDING — CREATE (NORMAL)
    ============================================================ */
 const createOnboarding = async (req, res) => {
   try {
@@ -29,7 +28,6 @@ const createOnboarding = async (req, res) => {
       });
     }
 
-    /* Check if user already exists */
     const exists = await User.findOne({ email });
     if (exists) {
       return res.status(409).json({
@@ -38,7 +36,6 @@ const createOnboarding = async (req, res) => {
       });
     }
 
-    /* Create the user account (password will be hashed by User model pre-save hook) */
     const user = await User.create({
       name,
       email,
@@ -48,16 +45,6 @@ const createOnboarding = async (req, res) => {
       isActive: true,
     });
 
-    /* Check if onboarding track already created for this user */
-    const alreadyOnboarded = await Onboarding.findOne({ userId: user._id });
-    if (alreadyOnboarded) {
-      return res.status(409).json({
-        success: false,
-        message: "Onboarding already exists for this user.",
-      });
-    }
-
-    /* Build tasks array from startup template */
     const tasks = STARTUP_TASKS.map((t) => ({ task: t, completed: false }));
 
     const onboarding = await Onboarding.create({
@@ -69,7 +56,7 @@ const createOnboarding = async (req, res) => {
       tasks,
     });
 
-    await onboarding.populate("userId", "name email phone role");
+    await onboarding.populate("userId", "name email phone role isActive");
     await onboarding.populate("assignedBy", "name email role");
 
     res.status(201).json({ success: true, onboarding });
@@ -79,7 +66,74 @@ const createOnboarding = async (req, res) => {
 };
 
 /* ============================================================
-   ONBOARDING — GET ALL
+   MANUAL ONBOARDING (HISTORICAL)
+   ============================================================ */
+const createManualOnboarding = async (req, res) => {
+  try {
+    const {
+      name, email, password, phone, role,
+      startDate, createdAt, status, allTasksCompleted,
+    } = req.body;
+
+    if (!name || !email || !password || !role || !startDate) {
+      return res.status(400).json({
+        success: false,
+        message: "name, email, password, role, and startDate are required.",
+      });
+    }
+
+    let user = await User.findOne({ email });
+    if (!user) {
+      user = await User.create({
+        name,
+        email,
+        password,
+        phone: phone || "",
+        role,
+        isActive: true,
+      });
+    }
+
+    const existing = await Onboarding.findOne({ userId: user._id });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: "Onboarding already exists for this user.",
+      });
+    }
+
+    const tasks = STARTUP_TASKS.map((t) => ({
+      task: t,
+      completed: allTasksCompleted === true,
+      completedAt: allTasksCompleted ? new Date(createdAt || Date.now()) : undefined,
+    }));
+
+    const onboarding = new Onboarding({
+      userId: user._id,
+      assignedBy: req.user._id,
+      role,
+      startDate,
+      status: status || "completed",
+      tasks,
+    });
+
+    if (createdAt) {
+      onboarding.createdAt = new Date(createdAt);
+      onboarding.updatedAt = new Date(createdAt);
+    }
+
+    await onboarding.save();
+    await onboarding.populate("userId", "name email phone role isActive");
+    await onboarding.populate("assignedBy", "name email role");
+
+    res.status(201).json({ success: true, onboarding });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
+   GET ALL ONBOARDING
    ============================================================ */
 const getAllOnboarding = async (req, res) => {
   try {
@@ -95,26 +149,25 @@ const getAllOnboarding = async (req, res) => {
 };
 
 /* ============================================================
-   ONBOARDING — TOGGLE TASK
+   TOGGLE TASK
    ============================================================ */
 const toggleOnboardingTask = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const onboarding = await Onboarding.findById(req.params.id);
 
+    const onboarding = await Onboarding.findById(req.params.id);
     if (!onboarding) {
-      return res.status(404).json({ success: false, message: "Onboarding record not found." });
+      return res.status(404).json({ success: false, message: "Not found" });
     }
 
     const task = onboarding.tasks.id(taskId);
     if (!task) {
-      return res.status(404).json({ success: false, message: "Task not found." });
+      return res.status(404).json({ success: false, message: "Task not found" });
     }
 
     task.completed = !task.completed;
     task.completedAt = task.completed ? new Date() : undefined;
 
-    /* Auto-update status */
     const allDone = onboarding.tasks.every((t) => t.completed);
     onboarding.status = allDone ? "completed" : "in-progress";
 
@@ -128,20 +181,19 @@ const toggleOnboardingTask = async (req, res) => {
 };
 
 /* ============================================================
-   ONBOARDING — DELETE
+   DELETE ONBOARDING
    ============================================================ */
 const deleteOnboarding = async (req, res) => {
   try {
     await Onboarding.findByIdAndDelete(req.params.id);
-    res.status(200).json({ success: true, message: "Onboarding record deleted." });
+    res.status(200).json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
 /* ============================================================
-   OFFBOARDING — CREATE
-   Suspends user account + creates offboarding checklist
+   OFFBOARDING — CREATE (NORMAL)
    ============================================================ */
 const createOffboarding = async (req, res) => {
   try {
@@ -159,16 +211,14 @@ const createOffboarding = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found." });
     }
 
-    /* Prevent double offboarding */
-    const already = await Offboarding.findOne({ userId });
-    if (already) {
+    const exists = await Offboarding.findOne({ userId });
+    if (exists) {
       return res.status(409).json({
         success: false,
-        message: "Offboarding already initiated for this user.",
+        message: "Offboarding already exists.",
       });
     }
 
-    /* ✅ Suspend the account immediately */
     user.isActive = false;
     await user.save();
 
@@ -181,7 +231,7 @@ const createOffboarding = async (req, res) => {
       clearanceStatus: { hr: false, it: false, finance: false, product: false },
     });
 
-    await offboarding.populate("userId", "name email phone role");
+    await offboarding.populate("userId", "name email role isActive");
     await offboarding.populate("initiatedBy", "name email role");
 
     res.status(201).json({ success: true, offboarding });
@@ -191,7 +241,77 @@ const createOffboarding = async (req, res) => {
 };
 
 /* ============================================================
-   OFFBOARDING — GET ALL
+   MANUAL OFFBOARDING (HISTORICAL)
+   ============================================================ */
+const createManualOffboarding = async (req, res) => {
+  try {
+    const {
+      name, email, role,
+      lastWorkingDay, reason,
+      createdAt, status, clearanceStatus,
+    } = req.body;
+
+    if (!name || !email || !role || !lastWorkingDay || !reason) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+      });
+    }
+
+    let user = await User.findOne({ email });
+
+    if (!user) {
+      const hashedPassword = await bcrypt.hash("Temp@123456", 10);
+      user = await User.create({
+        name,
+        email,
+        password: hashedPassword,
+        role,
+        isActive: false,
+      });
+    } else {
+      user.isActive = false;
+      await user.save();
+    }
+
+    const exists = await Offboarding.findOne({ userId: user._id });
+    if (exists) {
+      return res.status(409).json({
+        success: false,
+        message: "Already offboarded",
+      });
+    }
+
+    const offboarding = new Offboarding({
+      userId: user._id,
+      initiatedBy: req.user._id,
+      lastWorkingDay,
+      reason,
+      status: status || "completed",
+      clearanceStatus: {
+        hr: clearanceStatus?.hr ?? true,
+        it: clearanceStatus?.it ?? true,
+        finance: clearanceStatus?.finance ?? true,
+        product: clearanceStatus?.product ?? true,
+      },
+    });
+
+    if (createdAt) {
+      offboarding.createdAt = new Date(createdAt);
+      offboarding.updatedAt = new Date(createdAt);
+    }
+
+    await offboarding.save();
+    await offboarding.populate("userId", "name email role isActive");
+
+    res.status(201).json({ success: true, offboarding });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
+   GET ALL OFFBOARDING  ← WAS MISSING
    ============================================================ */
 const getAllOffboarding = async (req, res) => {
   try {
@@ -207,30 +327,37 @@ const getAllOffboarding = async (req, res) => {
 };
 
 /* ============================================================
-   OFFBOARDING — TOGGLE CLEARANCE
+   TOGGLE CLEARANCE  ← WAS MISSING
    ============================================================ */
 const toggleClearance = async (req, res) => {
   try {
     const { key } = req.body;
     const validKeys = ["hr", "it", "finance", "product"];
 
-    if (!validKeys.includes(key)) {
-      return res.status(400).json({ success: false, message: "Invalid clearance key." });
+    if (!key || !validKeys.includes(key)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid clearance key. Must be one of: hr, it, finance, product",
+      });
     }
 
     const offboarding = await Offboarding.findById(req.params.id);
     if (!offboarding) {
-      return res.status(404).json({ success: false, message: "Offboarding record not found." });
+      return res.status(404).json({ success: false, message: "Offboarding record not found" });
     }
 
     offboarding.clearanceStatus[key] = !offboarding.clearanceStatus[key];
 
-    /* Auto-complete when all clearances done */
     const allCleared = Object.values(offboarding.clearanceStatus).every(Boolean);
-    offboarding.status = allCleared ? "completed" : "in-progress";
+    if (allCleared) {
+      offboarding.status = "completed";
+    } else if (offboarding.status === "completed") {
+      offboarding.status = "in-progress";
+    }
 
     await offboarding.save();
     await offboarding.populate("userId", "name email phone role isActive");
+    await offboarding.populate("initiatedBy", "name email role");
 
     res.status(200).json({ success: true, offboarding });
   } catch (err) {
@@ -239,23 +366,29 @@ const toggleClearance = async (req, res) => {
 };
 
 /* ============================================================
-   OFFBOARDING — DELETE
+   DELETE OFFBOARDING
    ============================================================ */
 const deleteOffboarding = async (req, res) => {
   try {
     await Offboarding.findByIdAndDelete(req.params.id);
-    res.status(200).json({ success: true, message: "Offboarding record deleted." });
+    res.status(200).json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
+/* ============================================================
+   EXPORTS
+   ============================================================ */
 module.exports = {
   createOnboarding,
+  createManualOnboarding,
   getAllOnboarding,
   toggleOnboardingTask,
   deleteOnboarding,
+
   createOffboarding,
+  createManualOffboarding,
   getAllOffboarding,
   toggleClearance,
   deleteOffboarding,
