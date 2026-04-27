@@ -19,6 +19,7 @@ const vendorRoutes      = require("./routes/vendorRoutes");
 const freelancerRoutes  = require("./routes/freelancerRoutes");
 const onboardingRoutes  = require("./routes/onboardingRoutes");
 const helpdeskRoutes    = require("./routes/helpdeskRoutes");
+const userRoutes        = require("./routes/userRoutes"); // ✅ NEW
 
 const app = express();
 
@@ -28,19 +29,14 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  "https://elegant-pegasus-a8e5ed.netlify.app",   // ✅ your real frontend
+  "https://elegant-pegasus-a8e5ed.netlify.app",
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      // allow requests with no origin (Postman, mobile apps, server-to-server)
       if (!origin) return callback(null, true);
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
+      if (allowedOrigins.includes(origin)) return callback(null, true);
       console.warn("⚠️  CORS blocked origin:", origin);
       return callback(new Error(`CORS blocked: ${origin}`));
     },
@@ -110,6 +106,7 @@ app.use("/api/vendors",      vendorRoutes);
 app.use("/api/freelancers",  freelancerRoutes);
 app.use("/api/onboarding",   onboardingRoutes);
 app.use("/api/helpdesk",     helpdeskRoutes);
+app.use("/api/users",        userRoutes); // ✅ NEW
 
 /* ============================================================
    HEALTH CHECK
@@ -156,48 +153,24 @@ app.use((err, req, res, next) => {
   console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
   if (err.message && err.message.includes("CORS")) {
-    return res.status(403).json({
-      success: false,
-      message: err.message,
-    });
+    return res.status(403).json({ success: false, message: err.message });
   }
-
   if (err.name === "ValidationError") {
     const messages = Object.values(err.errors).map((e) => e.message);
-    return res.status(422).json({
-      success: false,
-      message: "Validation failed",
-      errors: messages,
-    });
+    return res.status(422).json({ success: false, message: "Validation failed", errors: messages });
   }
-
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue)[0];
-    return res.status(409).json({
-      success: false,
-      message: `${field} already exists.`,
-    });
+    return res.status(409).json({ success: false, message: `${field} already exists.` });
   }
-
   if (err.name === "JsonWebTokenError") {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid token.",
-    });
+    return res.status(401).json({ success: false, message: "Invalid token." });
   }
-
   if (err.name === "TokenExpiredError") {
-    return res.status(401).json({
-      success: false,
-      message: "Token expired. Please login again.",
-    });
+    return res.status(401).json({ success: false, message: "Token expired. Please login again." });
   }
-
   if (err.name === "CastError") {
-    return res.status(400).json({
-      success: false,
-      message: `Invalid ${err.path}: ${err.value}`,
-    });
+    return res.status(400).json({ success: false, message: `Invalid ${err.path}: ${err.value}` });
   }
 
   res.status(err.statusCode || 500).json({
