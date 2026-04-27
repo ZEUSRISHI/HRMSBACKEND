@@ -4,6 +4,49 @@ const User    = require("../models/User");
 const createProject = async (req, res) => {
   try {
     const project = await Project.create(req.body);
+    await project.populate("managerId",   "name email role");
+    await project.populate("teamMembers", "name email role");
+    res.status(201).json({ success: true, project });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ── MANUAL (historical) ── */
+const createManualProject = async (req, res) => {
+  try {
+    const {
+      name, description, clientName, deadline,
+      status, budget, spent, progress,
+      managerId, teamMembers, createdAt,
+    } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ success: false, message: "Project name is required." });
+    }
+
+    const project = new Project({
+      name,
+      description: description || "",
+      clientName:  clientName  || "",
+      deadline:    deadline    || "",
+      status:      status      || "completed",
+      budget:      Number(budget)   || 0,
+      spent:       Number(spent)    || 0,
+      progress:    Number(progress) || 0,
+      managerId:   managerId   || null,
+      teamMembers: teamMembers || [],
+    });
+
+    if (createdAt) {
+      project.createdAt = new Date(createdAt);
+      project.updatedAt = new Date(createdAt);
+    }
+
+    await project.save();
+    await project.populate("managerId",   "name email role");
+    await project.populate("teamMembers", "name email role");
+
     res.status(201).json({ success: true, project });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -13,8 +56,8 @@ const createProject = async (req, res) => {
 const getAllProjects = async (req, res) => {
   try {
     const projects = await Project.find()
-      .populate("managerId",   "name email")
-      .populate("teamMembers", "name email")
+      .populate("managerId",   "name email role")
+      .populate("teamMembers", "name email role")
       .sort({ createdAt: -1 });
     res.status(200).json({ success: true, projects });
   } catch (err) {
@@ -30,8 +73,8 @@ const getMyProjects = async (req, res) => {
         { teamMembers: req.user._id },
       ],
     })
-      .populate("managerId",   "name email")
-      .populate("teamMembers", "name email")
+      .populate("managerId",   "name email role")
+      .populate("teamMembers", "name email role")
       .sort({ createdAt: -1 });
     res.status(200).json({ success: true, projects });
   } catch (err) {
@@ -45,7 +88,9 @@ const updateProject = async (req, res) => {
       req.params.id,
       req.body,
       { new: true }
-    );
+    )
+      .populate("managerId",   "name email role")
+      .populate("teamMembers", "name email role");
     res.status(200).json({ success: true, project });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -61,7 +106,6 @@ const deleteProject = async (req, res) => {
   }
 };
 
-// ✅ Returns only managers (for managerId dropdown)
 const getManagers = async (req, res) => {
   try {
     const managers = await User.find({ role: "manager" }, "name email role");
@@ -71,7 +115,6 @@ const getManagers = async (req, res) => {
   }
 };
 
-// ✅ Returns hr + employees (for teamMembers dropdown)
 const getMembers = async (req, res) => {
   try {
     const members = await User.find(
@@ -86,6 +129,7 @@ const getMembers = async (req, res) => {
 
 module.exports = {
   createProject,
+  createManualProject,
   getAllProjects,
   getMyProjects,
   updateProject,
