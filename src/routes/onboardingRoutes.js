@@ -1,5 +1,3 @@
-const express = require("express");
-const router = express.Router();
 const {
   createOnboarding,
   getAllOnboarding,
@@ -9,21 +7,28 @@ const {
   getAllOffboarding,
   toggleClearance,
   deleteOffboarding,
+  createManualOnboarding,
+  createManualOffboarding,
 } = require("../controllers/onboardingController");
+
+const express = require("express");
+const router = express.Router();
 const { protect, authorize } = require("../middleware/auth");
 
 router.use(protect);
 
 /* ─── Onboarding routes ─── */
-router.post("/",                       authorize("admin", "hr"), createOnboarding);
-router.get("/",                        authorize("admin", "hr"), getAllOnboarding);
-router.patch("/:id/tasks/:taskId",     authorize("admin", "hr"), toggleOnboardingTask);
-router.delete("/:id",                  authorize("admin"),       deleteOnboarding);
+router.post("/",                        authorize("admin", "hr"), createOnboarding);
+router.post("/manual",                  authorize("admin", "hr"), createManualOnboarding);      // ← ADD
+router.get("/",                         authorize("admin", "hr"), getAllOnboarding);
+router.patch("/:id/tasks/:taskId",      authorize("admin", "hr"), toggleOnboardingTask);
+router.delete("/:id",                   authorize("admin"),       deleteOnboarding);
 
 /* ─── Offboarding routes ─── */
-router.post("/offboarding",            authorize("admin", "hr"), createOffboarding);
-router.get("/offboarding",             authorize("admin", "hr"), getAllOffboarding);
-router.patch("/offboarding/:id/clear", authorize("admin", "hr"), toggleClearance);
-router.delete("/offboarding/:id",      authorize("admin"),       deleteOffboarding);
+router.post("/offboarding",             authorize("admin", "hr"), createOffboarding);
+router.post("/offboarding/manual",      authorize("admin", "hr"), createManualOffboarding);     // ← ADD
+router.get("/offboarding",              authorize("admin", "hr"), getAllOffboarding);
+router.patch("/offboarding/:id/clear",  authorize("admin", "hr"), toggleClearance);
+router.delete("/offboarding/:id",       authorize("admin"),       deleteOffboarding);
 
 module.exports = router;
