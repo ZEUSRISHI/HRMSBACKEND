@@ -19,12 +19,31 @@ const vendorRoutes      = require("./routes/vendorRoutes");
 const freelancerRoutes  = require("./routes/freelancerRoutes");
 const onboardingRoutes  = require("./routes/onboardingRoutes");
 const helpdeskRoutes    = require("./routes/helpdeskRoutes");
-const userRoutes        = require("./routes/userRoutes"); // ✅ NEW
+const userRoutes        = require("./routes/userRoutes");
 
 const app = express();
 
 /* ============================================================
-   CORS
+   ✅ FIX #1 — TRUST PROXY
+   MUST be first line after const app = express()
+   Render runs behind a reverse proxy. Without this line:
+     → express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+     → That error fires on EVERY incoming request
+     → Requests never reach your route handlers
+     → Nothing ever gets saved to MongoDB
+   ============================================================ */
+app.set("trust proxy", 1);
+
+/* ============================================================
+   ✅ FIX #2 — CORS preflight (OPTIONS) handler
+   Netlify sends an OPTIONS preflight before every
+   POST / PUT / PATCH / DELETE request.
+   This must be declared before all other middleware.
+   ============================================================ */
+app.options("*", cors());
+
+/* ============================================================
+   CORS — allowed origins
    ============================================================ */
 const allowedOrigins = [
   "http://localhost:5173",
@@ -35,6 +54,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
+      // Allow requests with no origin (Postman, mobile apps, curl)
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
       console.warn("⚠️  CORS blocked origin:", origin);
@@ -61,6 +81,7 @@ if (process.env.NODE_ENV !== "test") {
 
 /* ============================================================
    RATE LIMITING
+   Works correctly now because trust proxy is set above
    ============================================================ */
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -85,7 +106,7 @@ const apiLimiter = rateLimit({
 });
 
 app.use("/api/auth", authLimiter);
-app.use("/api", apiLimiter);
+app.use("/api",      apiLimiter);
 
 /* ============================================================
    ROUTES
@@ -106,19 +127,19 @@ app.use("/api/vendors",      vendorRoutes);
 app.use("/api/freelancers",  freelancerRoutes);
 app.use("/api/onboarding",   onboardingRoutes);
 app.use("/api/helpdesk",     helpdeskRoutes);
-app.use("/api/users",        userRoutes); // ✅ NEW
+app.use("/api/users",        userRoutes);
 
 /* ============================================================
    HEALTH CHECK
    ============================================================ */
 app.get("/api/health", (req, res) => {
   res.status(200).json({
-    success: true,
-    status: "OK",
-    timestamp: new Date().toISOString(),
+    success:     true,
+    status:      "OK",
+    timestamp:   new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
-    database: "MongoDB Connected",
-    version: "1.0.0",
+    database:    "MongoDB Connected",
+    version:     "1.0.0",
   });
 });
 
@@ -130,7 +151,7 @@ app.get("/", (req, res) => {
     success: true,
     message: "Welcome to Quibo Tech HRMS API",
     version: "1.0.0",
-    docs: "https://hrmsbackends.onrender.com/api/health",
+    docs:    "https://hrmsbackends.onrender.com/api/health",
   });
 });
 
