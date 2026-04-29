@@ -24,26 +24,17 @@ const userRoutes        = require("./routes/userRoutes");
 const app = express();
 
 /* ============================================================
-   ✅ FIX #1 — TRUST PROXY
-   MUST be first line after const app = express()
-   Render runs behind a reverse proxy. Without this line:
-     → express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
-     → That error fires on EVERY incoming request
-     → Requests never reach your route handlers
-     → Nothing ever gets saved to MongoDB
+   ✅ CRITICAL FIX #1 — TRUST PROXY (MUST BE FIRST)
    ============================================================ */
 app.set("trust proxy", 1);
 
 /* ============================================================
-   ✅ FIX #2 — CORS preflight (OPTIONS) handler
-   Netlify sends an OPTIONS preflight before every
-   POST / PUT / PATCH / DELETE request.
-   This must be declared before all other middleware.
+   ✅ CRITICAL FIX #2 — HANDLE PREFLIGHT BEFORE EVERYTHING
    ============================================================ */
 app.options("*", cors());
 
 /* ============================================================
-   CORS — allowed origins
+   CORS CONFIG
    ============================================================ */
 const allowedOrigins = [
   "http://localhost:5173",
@@ -54,10 +45,10 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (Postman, mobile apps, curl)
-      if (!origin) return callback(null, true);
+      if (!origin) return callback(null, true); // Postman / mobile apps
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      console.warn("⚠️  CORS blocked origin:", origin);
+
+      console.warn("⚠️ CORS blocked origin:", origin);
       return callback(new Error(`CORS blocked: ${origin}`));
     },
     credentials: true,
@@ -80,15 +71,14 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 /* ============================================================
-   RATE LIMITING
-   Works correctly now because trust proxy is set above
+   RATE LIMITERS
    ============================================================ */
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
   message: {
     success: false,
-    message: "Too many requests from this IP. Please try again after 15 minutes.",
+    message: "Too many auth requests. Try again after 15 minutes.",
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -106,7 +96,7 @@ const apiLimiter = rateLimit({
 });
 
 app.use("/api/auth", authLimiter);
-app.use("/api",      apiLimiter);
+app.use("/api", apiLimiter);
 
 /* ============================================================
    ROUTES
@@ -134,12 +124,12 @@ app.use("/api/users",        userRoutes);
    ============================================================ */
 app.get("/api/health", (req, res) => {
   res.status(200).json({
-    success:     true,
-    status:      "OK",
-    timestamp:   new Date().toISOString(),
+    success: true,
+    status: "OK",
+    timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
-    database:    "MongoDB Connected",
-    version:     "1.0.0",
+    database: "MongoDB Connected",
+    version: "1.0.0",
   });
 });
 
@@ -151,7 +141,7 @@ app.get("/", (req, res) => {
     success: true,
     message: "Welcome to Quibo Tech HRMS API",
     version: "1.0.0",
-    docs:    "https://hrmsbackends.onrender.com/api/health",
+    docs: "https://hrmsbackends.onrender.com/api/health",
   });
 });
 
@@ -176,22 +166,40 @@ app.use((err, req, res, next) => {
   if (err.message && err.message.includes("CORS")) {
     return res.status(403).json({ success: false, message: err.message });
   }
+
   if (err.name === "ValidationError") {
     const messages = Object.values(err.errors).map((e) => e.message);
-    return res.status(422).json({ success: false, message: "Validation failed", errors: messages });
+    return res.status(422).json({
+      success: false,
+      message: "Validation failed",
+      errors: messages,
+    });
   }
+
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue)[0];
-    return res.status(409).json({ success: false, message: `${field} already exists.` });
+    return res.status(409).json({
+      success: false,
+      message: `${field} already exists.`,
+    });
   }
+
   if (err.name === "JsonWebTokenError") {
     return res.status(401).json({ success: false, message: "Invalid token." });
   }
+
   if (err.name === "TokenExpiredError") {
-    return res.status(401).json({ success: false, message: "Token expired. Please login again." });
+    return res.status(401).json({
+      success: false,
+      message: "Token expired. Please login again.",
+    });
   }
+
   if (err.name === "CastError") {
-    return res.status(400).json({ success: false, message: `Invalid ${err.path}: ${err.value}` });
+    return res.status(400).json({
+      success: false,
+      message: `Invalid ${err.path}: ${err.value}`,
+    });
   }
 
   res.status(err.statusCode || 500).json({
