@@ -1,8 +1,6 @@
 require("dotenv").config();
-const app = require("./app");
+const app       = require("./app");
 const connectDB = require("../config/db");
-
-// ✅ NO cors import or app.use(cors()) here — handled entirely in app.js
 
 const PORT = process.env.PORT || 5000;
 
@@ -19,7 +17,9 @@ const startServer = async () => {
       console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
       console.log(`📍  URL         : http://localhost:${PORT}`);
       console.log(`🌍  Environment : ${process.env.NODE_ENV || "development"}`);
-      console.log(`🗄️   Database    : ${process.env.MONGO_URI}`);
+      console.log(`🗄️   Database    : MongoDB via MONGO_URI`);
+      console.log(`🔒  Trust Proxy : ✅ enabled`);
+      console.log(`🌐  CORS        : ✅ https://hrms5.netlify.app`);
       console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
       console.log("\n📋  ALL API ENDPOINTS");
@@ -64,6 +64,7 @@ const startServer = async () => {
       console.log("   POST   /api/tasks");
       console.log("   GET    /api/tasks/all");
       console.log("   GET    /api/tasks/my");
+      console.log("   GET    /api/tasks/assignable");
       console.log("   PUT    /api/tasks/:id");
       console.log("   DELETE /api/tasks/:id");
       console.log("   POST   /api/tasks/:id/update");
@@ -122,6 +123,16 @@ const startServer = async () => {
       console.log("   GET    /api/freelancers");
       console.log("   PUT    /api/freelancers/:id");
       console.log("   DELETE /api/freelancers/:id");
+
+      console.log("\n👥  USERS  (Admin)");
+      console.log("   GET    /api/users");
+      console.log("   GET    /api/users/stats");
+      console.log("   GET    /api/users/:id");
+      console.log("   POST   /api/users");
+      console.log("   PUT    /api/users/:id");
+      console.log("   DELETE /api/users/:id");
+      console.log("   PATCH  /api/users/:id/toggle-status");
+      console.log("   PATCH  /api/users/:id/reset-password");
 
       console.log("\n🎫  HELPDESK");
       console.log("   POST   /api/helpdesk");
