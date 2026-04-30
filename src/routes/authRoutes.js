@@ -5,6 +5,9 @@ const authController = require("../controllers/authController");
 const { protect } = require("../middleware/auth");
 const validate = require("../middleware/validate");
 
+/* ============================================================
+   VALIDATION RULES
+   ============================================================ */
 const signupRules = [
   body("name").trim().notEmpty().withMessage("Name is required")
     .isLength({ min: 2, max: 100 }).withMessage("Name must be 2-100 characters"),
@@ -35,12 +38,21 @@ const changePasswordRules = [
     .isLength({ min: 6 }).withMessage("New password must be at least 6 characters"),
 ];
 
-router.post("/signup",          signupRules,         validate, authController.signup);
-router.post("/login",           loginRules,          validate, authController.login);
-router.post("/logout",          protect,                       authController.logout);
-router.post("/refresh-token",                                  authController.refreshToken);
-router.post("/reset-password",  resetPasswordRules,  validate, authController.resetPassword);
-router.put("/change-password",  protect, changePasswordRules, validate, authController.changePassword);
-router.get("/me",               protect,                       authController.getMe);
+const googleLoginRules = [
+  body("email").trim().notEmpty().withMessage("Email is required")
+    .isEmail().withMessage("Must be a valid email").normalizeEmail(),
+];
+
+/* ============================================================
+   ROUTES
+   ============================================================ */
+router.post("/signup",        signupRules,        validate, authController.signup);
+router.post("/login",         loginRules,         validate, authController.login);
+router.post("/google-login",  googleLoginRules,   validate, authController.googleLogin);
+router.post("/logout",        protect,                      authController.logout);
+router.post("/refresh-token",                               authController.refreshToken);
+router.post("/reset-password", resetPasswordRules, validate, authController.resetPassword);
+router.put("/change-password", protect, changePasswordRules, validate, authController.changePassword);
+router.get("/me",              protect,                      authController.getMe);
 
 module.exports = router;
