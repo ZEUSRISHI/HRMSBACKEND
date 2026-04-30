@@ -19,7 +19,7 @@ const startServer = async () => {
       console.log(`🌍  Environment : ${process.env.NODE_ENV || "development"}`);
       console.log(`🗄️   Database    : MongoDB via MONGO_URI`);
       console.log(`🔒  Trust Proxy : ✅ enabled`);
-      console.log(`🌐  CORS        : ✅ https://hrms5.netlify.app`);
+      console.log(`🌐  CORS        : ✅ https://enchanting-queijadas-dc4703.netlify.app/`);
       console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
       console.log("\n📋  ALL API ENDPOINTS");
