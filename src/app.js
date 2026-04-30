@@ -24,14 +24,9 @@ const userRoutes        = require("./routes/userRoutes");
 const app = express();
 
 /* ============================================================
-   ✅ CRITICAL FIX #1 — TRUST PROXY (MUST BE FIRST)
+   TRUST PROXY (MUST BE FIRST)
    ============================================================ */
 app.set("trust proxy", 1);
-
-/* ============================================================
-   ✅ CRITICAL FIX #2 — HANDLE PREFLIGHT BEFORE EVERYTHING
-   ============================================================ */
-app.options("*", cors());
 
 /* ============================================================
    CORS CONFIG
@@ -39,23 +34,29 @@ app.options("*", cors());
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  "https://enchanting-queijadas-dc4703.netlify.app/",
+  "https://enchanting-queijadas-dc4703.netlify.app", // ← no trailing slash
 ];
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // Postman / mobile apps
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow Postman / mobile / server-to-server (no origin header)
+    if (!origin) return callback(null, true);
 
-      console.warn("⚠️ CORS blocked origin:", origin);
-      return callback(new Error(`CORS blocked: ${origin}`));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+
+    console.warn("⚠️ CORS blocked origin:", origin);
+    return callback(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+// Handle preflight BEFORE all other middleware
+app.options("*", cors(corsOptions));
+
+// Apply CORS to all routes
+app.use(cors(corsOptions));
 
 /* ============================================================
    BODY PARSERS
@@ -96,7 +97,7 @@ const apiLimiter = rateLimit({
 });
 
 app.use("/api/auth", authLimiter);
-app.use("/api", apiLimiter);
+app.use("/api",      apiLimiter);
 
 /* ============================================================
    ROUTES
