@@ -39,7 +39,7 @@ app.options("*", cors());
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  "https://hrms5.netlify.app",
+  "https://enchanting-queijadas-dc4703.netlify.app/",
 ];
 
 app.use(
