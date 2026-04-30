@@ -5,9 +5,11 @@ const {
   verifyRefreshToken,
 } = require("../utils/jwt");
 
-// Helper — send token response
+/* ============================================================
+   HELPER — send token response
+   ============================================================ */
 const sendTokenResponse = (user, statusCode, res, message = "Success") => {
-  const accessToken = generateAccessToken(user._id, user.role);
+  const accessToken  = generateAccessToken(user._id, user.role);
   const refreshToken = generateRefreshToken(user._id);
 
   user.refreshToken = refreshToken;
@@ -88,6 +90,46 @@ exports.login = async (req, res) => {
   }
 };
 
+// @desc    Google OAuth login (lookup by email, no password required)
+// @route   POST /api/auth/google-login
+// @access  Public
+exports.googleLogin = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required.",
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "No account found for this Google email. Please contact your admin.",
+      });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Account deactivated. Contact your administrator.",
+      });
+    }
+
+    user.lastLogin = new Date();
+    await user.save({ validateBeforeSave: false });
+
+    sendTokenResponse(user, 200, res, "Google login successful.");
+  } catch (error) {
+    console.error("Google login error:", error);
+    res.status(500).json({ success: false, message: "Server error during Google login." });
+  }
+};
+
 // @desc    Logout
 // @route   POST /api/auth/logout
 // @access  Private
@@ -112,7 +154,7 @@ exports.refreshToken = async (req, res) => {
     }
 
     const decoded = verifyRefreshToken(refreshToken);
-    const user = await User.findById(decoded.id).select("+refreshToken");
+    const user    = await User.findById(decoded.id).select("+refreshToken");
 
     if (!user || user.refreshToken !== refreshToken) {
       return res.status(401).json({ success: false, message: "Invalid refresh token." });
@@ -134,7 +176,10 @@ exports.resetPassword = async (req, res) => {
     const user = await User.findOne({ email: email.toLowerCase() });
 
     if (!user) {
-      return res.status(404).json({ success: false, message: "No account found with this email." });
+      return res.status(404).json({
+        success: false,
+        message: "No account found with this email.",
+      });
     }
 
     user.password = newPassword;
@@ -158,7 +203,10 @@ exports.changePassword = async (req, res) => {
 
     const isMatch = await user.comparePassword(oldPassword);
     if (!isMatch) {
-      return res.status(401).json({ success: false, message: "Current password is incorrect." });
+      return res.status(401).json({
+        success: false,
+        message: "Current password is incorrect.",
+      });
     }
 
     user.password = newPassword;
