@@ -1,56 +1,42 @@
 // controllers/attendanceController.js
+"use strict";
+// process.env.TZ = "Asia/Kolkata" is already set in server.js
+// So new Date() everywhere in this file will return IST automatically
+
 const Attendance = require("../models/Attendance");
 
 /* ============================================================
    IST TIME HELPERS
+   (These work correctly because TZ=Asia/Kolkata is set in server.js)
    ============================================================ */
 
-// Get current IST date as "YYYY-MM-DD"
+// Returns "YYYY-MM-DD" in IST
 const todayStr = () => {
   const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60 * 1000));
-  const y  = istTime.getUTCFullYear();
-  const m  = String(istTime.getUTCMonth() + 1).padStart(2, "0");
-  const d  = String(istTime.getUTCDate()).padStart(2, "0");
+  const y   = now.getFullYear();
+  const m   = String(now.getMonth() + 1).padStart(2, "0");
+  const d   = String(now.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 };
 
-// Get current IST time as "hh:mm AM/PM"
+// Returns "hh:mm AM/PM" in IST
 const nowTimeStr = () => {
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60 * 1000));
-  const hours   = istTime.getUTCHours();
-  const minutes = istTime.getUTCMinutes();
-  const ampm    = hours >= 12 ? "PM" : "AM";
-  const h12     = hours % 12 || 12;
-  return (
-    h12.toString().padStart(2, "0") +
-    ":" +
-    minutes.toString().padStart(2, "0") +
-    " " +
-    ampm
-  );
+  const now   = new Date();
+  const hours = now.getHours();
+  const mins  = now.getMinutes();
+  const ampm  = hours >= 12 ? "PM" : "AM";
+  const h12   = hours % 12 || 12;
+  return `${h12.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")} ${ampm}`;
 };
 
-// Convert "HH:mm" (from time input) to "hh:mm AM/PM"
-const convertTo12Hour = (timeStr) => {
-  if (!timeStr) return null;
-  // Already in 12-hour format
-  if (timeStr.includes("AM") || timeStr.includes("PM")) return timeStr;
-  const [hourStr, minuteStr] = timeStr.split(":");
-  const hours   = parseInt(hourStr, 10);
-  const minutes = parseInt(minuteStr, 10);
-  const ampm    = hours >= 12 ? "PM" : "AM";
-  const h12     = hours % 12 || 12;
-  return (
-    h12.toString().padStart(2, "0") +
-    ":" +
-    minutes.toString().padStart(2, "0") +
-    " " +
-    ampm
-  );
+// Convert "HH:mm" from <input type="time"> → "hh:mm AM/PM"
+const to12Hour = (t) => {
+  if (!t) return null;
+  if (t.includes("AM") || t.includes("PM")) return t;
+  const [hh, mm] = t.split(":").map(Number);
+  const ampm = hh >= 12 ? "PM" : "AM";
+  const h12  = hh % 12 || 12;
+  return `${h12.toString().padStart(2, "0")}:${mm.toString().padStart(2, "0")} ${ampm}`;
 };
 
 const toDateStr = (d) => {
@@ -77,12 +63,13 @@ const eachDay = (startStr, endStr) => {
 };
 
 /* ============================================================
-   CHECK IN
+   CHECK IN — stores IST time to MongoDB
    POST /api/attendance/checkin
    ============================================================ */
 const checkIn = async (req, res) => {
   try {
-    const today = todayStr();
+    const today   = todayStr();
+    const timeNow = nowTimeStr();
 
     const existing = await Attendance.findOne({
       userId:   req.user._id,
@@ -101,16 +88,18 @@ const checkIn = async (req, res) => {
     const record = await Attendance.create({
       userId:   req.user._id,
       date:     today,
-      checkIn:  nowTimeStr(),
+      checkIn:  timeNow,    // ← IST "hh:mm AM/PM" saved in MongoDB
       status:   "present",
       isManual: false,
     });
 
     await record.populate("userId", "name email role");
 
+    console.log(`✅ CheckIn → user: ${req.user.name} | date: ${today} | time: ${timeNow}`);
+
     res.status(201).json({
       success: true,
-      message: "Checked in successfully.",
+      message: `Checked in successfully at ${timeNow}`,
       record,
     });
   } catch (err) {
@@ -120,7 +109,6 @@ const checkIn = async (req, res) => {
         date:     todayStr(),
         isManual: false,
       }).populate("userId", "name email role");
-
       return res.status(400).json({
         success: false,
         message: "Already checked in today.",
@@ -133,16 +121,17 @@ const checkIn = async (req, res) => {
 };
 
 /* ============================================================
-   CHECK OUT
+   CHECK OUT — stores IST time to MongoDB
    POST /api/attendance/checkout
    ============================================================ */
 const checkOut = async (req, res) => {
   try {
-    const today = todayStr();
+    const today   = todayStr();
+    const timeNow = nowTimeStr();
 
     const record = await Attendance.findOneAndUpdate(
       { userId: req.user._id, date: today, isManual: false },
-      { checkOut: nowTimeStr() },
+      { checkOut: timeNow },    // ← IST "hh:mm AM/PM" saved in MongoDB
       { new: true }
     ).populate("userId", "name email role");
 
@@ -153,9 +142,11 @@ const checkOut = async (req, res) => {
       });
     }
 
+    console.log(`✅ CheckOut → user: ${req.user.name} | date: ${today} | time: ${timeNow}`);
+
     res.status(200).json({
       success: true,
-      message: "Checked out successfully.",
+      message: `Checked out successfully at ${timeNow}`,
       record,
     });
   } catch (err) {
@@ -165,7 +156,7 @@ const checkOut = async (req, res) => {
 };
 
 /* ============================================================
-   GET TODAY ATTENDANCE  (logged-in user only)
+   GET TODAY ATTENDANCE — current logged-in user
    GET /api/attendance/today
    ============================================================ */
 const getTodayAttendance = async (req, res) => {
@@ -175,7 +166,6 @@ const getTodayAttendance = async (req, res) => {
       date:     todayStr(),
       isManual: false,
     });
-
     res.status(200).json({ success: true, record: record || null });
   } catch (err) {
     console.error("getTodayAttendance error:", err);
@@ -184,7 +174,7 @@ const getTodayAttendance = async (req, res) => {
 };
 
 /* ============================================================
-   GET TODAY ALL USERS  (Admin / HR / Manager)
+   GET TODAY ALL USERS — Admin / HR / Manager
    GET /api/attendance/today-all
    ============================================================ */
 const getTodayAll = async (req, res) => {
@@ -213,7 +203,6 @@ const getMyAttendance = async (req, res) => {
       userId:   req.user._id,
       isManual: false,
     }).sort({ date: -1 });
-
     res.status(200).json({ success: true, total: records.length, records });
   } catch (err) {
     console.error("getMyAttendance error:", err);
@@ -222,8 +211,9 @@ const getMyAttendance = async (req, res) => {
 };
 
 /* ============================================================
-   GET ALL ATTENDANCE  (Admin / HR / Manager)
+   GET ALL ATTENDANCE — Admin / HR / Manager
    GET /api/attendance/all
+   Returns both real + manual records merged
    ============================================================ */
 const getAllAttendance = async (req, res) => {
   try {
@@ -231,7 +221,6 @@ const getAllAttendance = async (req, res) => {
       .populate("userId",    "name email role department")
       .populate("enteredBy", "name")
       .sort({ date: -1 });
-
     res.status(200).json({ success: true, total: records.length, records });
   } catch (err) {
     console.error("getAllAttendance error:", err);
@@ -240,7 +229,8 @@ const getAllAttendance = async (req, res) => {
 };
 
 /* ============================================================
-   ADD MANUAL ATTENDANCE  (Admin only)
+   ADD MANUAL ATTENDANCE — Admin only
+   Saves each day in the date range to MongoDB
    POST /api/attendance/manual
    Body: { employeeName, employeeRole, startDate, endDate, checkIn, checkOut? }
    ============================================================ */
@@ -255,10 +245,11 @@ const addManualAttendance = async (req, res) => {
       checkOut,
     } = req.body;
 
+    /* ── Validation ── */
     if (!employeeName || !employeeRole || !startDate || !endDate || !checkIn) {
       return res.status(400).json({
         success: false,
-        message: "employeeName, employeeRole, startDate, endDate and checkIn are all required.",
+        message: "employeeName, employeeRole, startDate, endDate and checkIn are required.",
       });
     }
 
@@ -278,17 +269,19 @@ const addManualAttendance = async (req, res) => {
       });
     }
 
+    /* ── Convert HH:mm → hh:mm AM/PM for consistency ── */
+    const checkInFormatted  = to12Hour(checkIn);
+    const checkOutFormatted = checkOut ? to12Hour(checkOut) : null;
+
+    /* ── Generate one record per day in range ── */
     const days = eachDay(startDate, endDate);
 
-    // Convert times from HH:mm to hh:mm AM/PM for consistency
-    const checkInFormatted  = convertTo12Hour(checkIn);
-    const checkOutFormatted = checkOut ? convertTo12Hour(checkOut) : null;
-
+    /* ── Save all days to MongoDB ── */
     const records = await Attendance.insertMany(
       days.map((date) => ({
         date,
-        checkIn:            checkInFormatted,
-        checkOut:           checkOutFormatted,
+        checkIn:            checkInFormatted,    // "hh:mm AM/PM" in MongoDB
+        checkOut:           checkOutFormatted,   // "hh:mm AM/PM" or null in MongoDB
         status:             "present",
         isManual:           true,
         manualEmployeeName: employeeName.trim(),
@@ -298,9 +291,11 @@ const addManualAttendance = async (req, res) => {
       }))
     );
 
+    console.log(`✅ Manual Attendance saved → ${records.length} record(s) | employee: ${employeeName} | ${startDate} to ${endDate} | by: ${req.user.name}`);
+
     res.status(201).json({
       success: true,
-      message: `${records.length} manual attendance record(s) saved successfully.`,
+      message: `${records.length} manual attendance record(s) saved to MongoDB successfully.`,
       records,
     });
   } catch (err) {
@@ -310,7 +305,7 @@ const addManualAttendance = async (req, res) => {
 };
 
 /* ============================================================
-   GET ALL MANUAL ATTENDANCE  (Admin only)
+   GET ALL MANUAL ATTENDANCE — Admin only
    GET /api/attendance/manual
    ============================================================ */
 const getManualAttendance = async (req, res) => {
@@ -318,7 +313,6 @@ const getManualAttendance = async (req, res) => {
     const records = await Attendance.find({ isManual: true })
       .populate("enteredBy", "name")
       .sort({ date: -1 });
-
     res.status(200).json({ success: true, total: records.length, records });
   } catch (err) {
     console.error("getManualAttendance error:", err);
@@ -327,7 +321,7 @@ const getManualAttendance = async (req, res) => {
 };
 
 /* ============================================================
-   DELETE ONE MANUAL ATTENDANCE RECORD  (Admin only)
+   DELETE ONE MANUAL ATTENDANCE RECORD — Admin only
    DELETE /api/attendance/manual/:id
    ============================================================ */
 const deleteManualAttendance = async (req, res) => {
@@ -344,9 +338,11 @@ const deleteManualAttendance = async (req, res) => {
       });
     }
 
+    console.log(`🗑️ Manual Attendance deleted → id: ${req.params.id} | by: ${req.user.name}`);
+
     res.status(200).json({
       success: true,
-      message: "Manual attendance record deleted successfully.",
+      message: "Manual attendance record deleted from MongoDB successfully.",
     });
   } catch (err) {
     console.error("deleteManualAttendance error:", err);
