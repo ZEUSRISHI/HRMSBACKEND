@@ -9,10 +9,19 @@ const todayStr = () => new Date().toISOString().split("T")[0];
 
 const nowTimeStr = () => {
   const now = new Date();
+  // Convert to IST (UTC+5:30)
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istTime = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60 * 1000));
+  const hours = istTime.getUTCHours();
+  const minutes = istTime.getUTCMinutes();
+  const ampm = hours >= 12 ? "PM" : "AM";
+  const h12 = hours % 12 || 12;
   return (
-    now.getHours().toString().padStart(2, "0") +
+    h12.toString().padStart(2, "0") +
     ":" +
-    now.getMinutes().toString().padStart(2, "0")
+    minutes.toString().padStart(2, "0") +
+    " " +
+    ampm
   );
 };
 
