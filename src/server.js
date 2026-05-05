@@ -1,3 +1,5 @@
+process.env.TZ = "Asia/Kolkata"; // ← ADD THIS AS FIRST LINE
+
 require("dotenv").config();
 const app       = require("./app");
 const connectDB = require("../config/db");
@@ -19,6 +21,7 @@ const startServer = async () => {
       console.log(`🌍  Environment : ${process.env.NODE_ENV || "development"}`);
       console.log(`🗄️   Database    : MongoDB via MONGO_URI`);
       console.log(`🔒  Trust Proxy : ✅ enabled`);
+      console.log(`⏰  Timezone    : ${process.env.TZ} ✅`);
       console.log(`🌐  CORS        : ✅ https://enchanting-queijadas-dc4703.netlify.app/`);
       console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
@@ -51,6 +54,10 @@ const startServer = async () => {
       console.log("   GET    /api/attendance/today");
       console.log("   GET    /api/attendance/my");
       console.log("   GET    /api/attendance/all");
+      console.log("   GET    /api/attendance/today-all");
+      console.log("   POST   /api/attendance/manual");
+      console.log("   GET    /api/attendance/manual");
+      console.log("   DELETE /api/attendance/manual/:id");
 
       console.log("\n🌴  LEAVES");
       console.log("   POST   /api/leaves/apply");
