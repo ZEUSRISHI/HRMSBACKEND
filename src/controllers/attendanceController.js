@@ -2,20 +2,48 @@
 const Attendance = require("../models/Attendance");
 
 /* ============================================================
-   PURE JS DATE HELPERS  (no external dependency)
+   IST TIME HELPERS
    ============================================================ */
 
-const todayStr = () => new Date().toISOString().split("T")[0];
-
-const nowTimeStr = () => {
+// Get current IST date as "YYYY-MM-DD"
+const todayStr = () => {
   const now = new Date();
-  // Convert to IST (UTC+5:30)
   const istOffset = 5.5 * 60 * 60 * 1000;
   const istTime = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60 * 1000));
-  const hours = istTime.getUTCHours();
+  const y  = istTime.getUTCFullYear();
+  const m  = String(istTime.getUTCMonth() + 1).padStart(2, "0");
+  const d  = String(istTime.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+// Get current IST time as "hh:mm AM/PM"
+const nowTimeStr = () => {
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istTime = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60 * 1000));
+  const hours   = istTime.getUTCHours();
   const minutes = istTime.getUTCMinutes();
-  const ampm = hours >= 12 ? "PM" : "AM";
-  const h12 = hours % 12 || 12;
+  const ampm    = hours >= 12 ? "PM" : "AM";
+  const h12     = hours % 12 || 12;
+  return (
+    h12.toString().padStart(2, "0") +
+    ":" +
+    minutes.toString().padStart(2, "0") +
+    " " +
+    ampm
+  );
+};
+
+// Convert "HH:mm" (from time input) to "hh:mm AM/PM"
+const convertTo12Hour = (timeStr) => {
+  if (!timeStr) return null;
+  // Already in 12-hour format
+  if (timeStr.includes("AM") || timeStr.includes("PM")) return timeStr;
+  const [hourStr, minuteStr] = timeStr.split(":");
+  const hours   = parseInt(hourStr, 10);
+  const minutes = parseInt(minuteStr, 10);
+  const ampm    = hours >= 12 ? "PM" : "AM";
+  const h12     = hours % 12 || 12;
   return (
     h12.toString().padStart(2, "0") +
     ":" +
@@ -26,7 +54,6 @@ const nowTimeStr = () => {
 };
 
 const toDateStr = (d) => {
-  // Returns "YYYY-MM-DD" for any Date object (local time)
   const y  = d.getFullYear();
   const m  = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
@@ -38,7 +65,6 @@ const parseLocalDate = (str) => {
   return new Date(y, m - 1, d);
 };
 
-// Returns array of "YYYY-MM-DD" strings from startStr to endStr inclusive
 const eachDay = (startStr, endStr) => {
   const days   = [];
   const cursor = parseLocalDate(startStr);
@@ -58,7 +84,6 @@ const checkIn = async (req, res) => {
   try {
     const today = todayStr();
 
-    // Check if already checked in
     const existing = await Attendance.findOne({
       userId:   req.user._id,
       date:     today,
@@ -89,7 +114,6 @@ const checkIn = async (req, res) => {
       record,
     });
   } catch (err) {
-    // Handle race-condition duplicate key gracefully
     if (err.code === 11000) {
       const existing = await Attendance.findOne({
         userId:   req.user._id,
@@ -200,7 +224,6 @@ const getMyAttendance = async (req, res) => {
 /* ============================================================
    GET ALL ATTENDANCE  (Admin / HR / Manager)
    GET /api/attendance/all
-   Returns BOTH real and manual records merged and sorted by date
    ============================================================ */
 const getAllAttendance = async (req, res) => {
   try {
@@ -232,12 +255,10 @@ const addManualAttendance = async (req, res) => {
       checkOut,
     } = req.body;
 
-    /* ── Validation ── */
     if (!employeeName || !employeeRole || !startDate || !endDate || !checkIn) {
       return res.status(400).json({
         success: false,
-        message:
-          "employeeName, employeeRole, startDate, endDate and checkIn are all required.",
+        message: "employeeName, employeeRole, startDate, endDate and checkIn are all required.",
       });
     }
 
@@ -246,8 +267,7 @@ const addManualAttendance = async (req, res) => {
     if (endDate >= today) {
       return res.status(400).json({
         success: false,
-        message:
-          "Manual entry is only allowed for previous dates (not today or future).",
+        message: "Manual entry is only allowed for previous dates (not today or future).",
       });
     }
 
@@ -258,15 +278,17 @@ const addManualAttendance = async (req, res) => {
       });
     }
 
-    /* ── One document per calendar day ── */
     const days = eachDay(startDate, endDate);
+
+    // Convert times from HH:mm to hh:mm AM/PM for consistency
+    const checkInFormatted  = convertTo12Hour(checkIn);
+    const checkOutFormatted = checkOut ? convertTo12Hour(checkOut) : null;
 
     const records = await Attendance.insertMany(
       days.map((date) => ({
-        // NOTE: no userId field — manual records are free-text only
         date,
-        checkIn,
-        checkOut:           checkOut || null,
+        checkIn:            checkInFormatted,
+        checkOut:           checkOutFormatted,
         status:             "present",
         isManual:           true,
         manualEmployeeName: employeeName.trim(),
