@@ -1,16 +1,11 @@
 // controllers/attendanceController.js
 "use strict";
-// process.env.TZ = "Asia/Kolkata" is already set in server.js
-// So new Date() everywhere in this file will return IST automatically
 
 const Attendance = require("../models/Attendance");
 
 /* ============================================================
    IST TIME HELPERS
-   (These work correctly because TZ=Asia/Kolkata is set in server.js)
    ============================================================ */
-
-// Returns "YYYY-MM-DD" in IST
 const todayStr = () => {
   const now = new Date();
   const y   = now.getFullYear();
@@ -19,7 +14,6 @@ const todayStr = () => {
   return `${y}-${m}-${d}`;
 };
 
-// Returns "hh:mm AM/PM" in IST
 const nowTimeStr = () => {
   const now   = new Date();
   const hours = now.getHours();
@@ -29,7 +23,6 @@ const nowTimeStr = () => {
   return `${h12.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")} ${ampm}`;
 };
 
-// Convert "HH:mm" from <input type="time"> → "hh:mm AM/PM"
 const to12Hour = (t) => {
   if (!t) return null;
   if (t.includes("AM") || t.includes("PM")) return t;
@@ -63,7 +56,7 @@ const eachDay = (startStr, endStr) => {
 };
 
 /* ============================================================
-   CHECK IN — stores IST time to MongoDB
+   CHECK IN — Manual only, user must click the button
    POST /api/attendance/checkin
    ============================================================ */
 const checkIn = async (req, res) => {
@@ -71,6 +64,7 @@ const checkIn = async (req, res) => {
     const today   = todayStr();
     const timeNow = nowTimeStr();
 
+    // Check if already checked in today
     const existing = await Attendance.findOne({
       userId:   req.user._id,
       date:     today,
@@ -85,17 +79,18 @@ const checkIn = async (req, res) => {
       });
     }
 
+    // Create new check-in record in MongoDB
     const record = await Attendance.create({
       userId:   req.user._id,
       date:     today,
-      checkIn:  timeNow,    // ← IST "hh:mm AM/PM" saved in MongoDB
+      checkIn:  timeNow,
       status:   "present",
       isManual: false,
     });
 
     await record.populate("userId", "name email role");
 
-    console.log(`✅ CheckIn → user: ${req.user.name} | date: ${today} | time: ${timeNow}`);
+    console.log(`✅ Manual CheckIn → user: ${req.user.name} | date: ${today} | time: ${timeNow}`);
 
     res.status(201).json({
       success: true,
@@ -121,7 +116,7 @@ const checkIn = async (req, res) => {
 };
 
 /* ============================================================
-   CHECK OUT — stores IST time to MongoDB
+   CHECK OUT — Manual only, user must click the button
    POST /api/attendance/checkout
    ============================================================ */
 const checkOut = async (req, res) => {
@@ -131,7 +126,7 @@ const checkOut = async (req, res) => {
 
     const record = await Attendance.findOneAndUpdate(
       { userId: req.user._id, date: today, isManual: false },
-      { checkOut: timeNow },    // ← IST "hh:mm AM/PM" saved in MongoDB
+      { checkOut: timeNow },
       { new: true }
     ).populate("userId", "name email role");
 
@@ -142,7 +137,7 @@ const checkOut = async (req, res) => {
       });
     }
 
-    console.log(`✅ CheckOut → user: ${req.user.name} | date: ${today} | time: ${timeNow}`);
+    console.log(`✅ Manual CheckOut → user: ${req.user.name} | date: ${today} | time: ${timeNow}`);
 
     res.status(200).json({
       success: true,
@@ -213,7 +208,6 @@ const getMyAttendance = async (req, res) => {
 /* ============================================================
    GET ALL ATTENDANCE — Admin / HR / Manager
    GET /api/attendance/all
-   Returns both real + manual records merged
    ============================================================ */
 const getAllAttendance = async (req, res) => {
   try {
@@ -229,10 +223,8 @@ const getAllAttendance = async (req, res) => {
 };
 
 /* ============================================================
-   ADD MANUAL ATTENDANCE — Admin only
-   Saves each day in the date range to MongoDB
+   ADD MANUAL ATTENDANCE — Admin only (for previous dates)
    POST /api/attendance/manual
-   Body: { employeeName, employeeRole, startDate, endDate, checkIn, checkOut? }
    ============================================================ */
 const addManualAttendance = async (req, res) => {
   try {
@@ -245,7 +237,6 @@ const addManualAttendance = async (req, res) => {
       checkOut,
     } = req.body;
 
-    /* ── Validation ── */
     if (!employeeName || !employeeRole || !startDate || !endDate || !checkIn) {
       return res.status(400).json({
         success: false,
@@ -269,19 +260,16 @@ const addManualAttendance = async (req, res) => {
       });
     }
 
-    /* ── Convert HH:mm → hh:mm AM/PM for consistency ── */
     const checkInFormatted  = to12Hour(checkIn);
     const checkOutFormatted = checkOut ? to12Hour(checkOut) : null;
 
-    /* ── Generate one record per day in range ── */
     const days = eachDay(startDate, endDate);
 
-    /* ── Save all days to MongoDB ── */
     const records = await Attendance.insertMany(
       days.map((date) => ({
         date,
-        checkIn:            checkInFormatted,    // "hh:mm AM/PM" in MongoDB
-        checkOut:           checkOutFormatted,   // "hh:mm AM/PM" or null in MongoDB
+        checkIn:            checkInFormatted,
+        checkOut:           checkOutFormatted,
         status:             "present",
         isManual:           true,
         manualEmployeeName: employeeName.trim(),
@@ -295,7 +283,7 @@ const addManualAttendance = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: `${records.length} manual attendance record(s) saved to MongoDB successfully.`,
+      message: `${records.length} manual attendance record(s) saved successfully.`,
       records,
     });
   } catch (err) {
@@ -342,7 +330,7 @@ const deleteManualAttendance = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Manual attendance record deleted from MongoDB successfully.",
+      message: "Manual attendance record deleted successfully.",
     });
   } catch (err) {
     console.error("deleteManualAttendance error:", err);
@@ -350,9 +338,6 @@ const deleteManualAttendance = async (req, res) => {
   }
 };
 
-/* ============================================================
-   EXPORTS
-   ============================================================ */
 module.exports = {
   checkIn,
   checkOut,
