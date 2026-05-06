@@ -15,6 +15,23 @@ const Vendor       = require("../src/models/Vendor");
 const Freelancer   = require("../src/models/Freelancer");
 
 /* ============================================================
+   CLEAN TODAY'S ATTENDANCE
+   Automatically deletes any seeded records for today so users
+   always start with "Not Checked In" and must check in manually.
+   ============================================================ */
+const cleanTodayAttendance = async () => {
+  console.log("\n🧹  Cleaning today's attendance records...");
+  const today  = new Date().toISOString().split("T")[0];
+  const result = await Attendance.deleteMany({ date: today, isManual: false });
+  if (result.deletedCount > 0) {
+    console.log(`   ✅ Deleted ${result.deletedCount} seeded record(s) for today (${today})`);
+    console.log(`   ℹ️  Users must now check in manually via the UI`);
+  } else {
+    console.log(`   ℹ️  No today's records found — nothing to clean`);
+  }
+};
+
+/* ============================================================
    SEED USERS
    ============================================================ */
 const seedUsers = async () => {
@@ -96,31 +113,35 @@ const seedUsers = async () => {
 
 /* ============================================================
    SEED ATTENDANCE
+   — Never seeds today. All records are previous dates only.
+   — Users must manually check in/out for today via the UI.
    ============================================================ */
 const seedAttendance = async (users) => {
   console.log("\n⏰  Seeding Attendance...");
 
-  const today        = new Date().toISOString().split("T")[0];
+  // today is intentionally excluded — seed only past dates
   const yesterday    = new Date(Date.now() - 1 * 86400000).toISOString().split("T")[0];
   const twoDaysAgo   = new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0];
   const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split("T")[0];
   const fourDaysAgo  = new Date(Date.now() - 4 * 86400000).toISOString().split("T")[0];
+  const fiveDaysAgo  = new Date(Date.now() - 5 * 86400000).toISOString().split("T")[0];
 
-  const dates = [today, yesterday, twoDaysAgo, threeDaysAgo, fourDaysAgo];
+  const dates = [yesterday, twoDaysAgo, threeDaysAgo, fourDaysAgo, fiveDaysAgo];
 
   let created = 0;
   let skipped = 0;
 
   for (const user of users) {
     for (const date of dates) {
-      const exists = await Attendance.findOne({ userId: user._id, date });
+      const exists = await Attendance.findOne({ userId: user._id, date, isManual: false });
       if (!exists) {
         await Attendance.create({
           userId:   user._id,
           date,
-          checkIn:  "09:00",
-          checkOut: date === today ? null : "18:00",
+          checkIn:  "09:00 AM",
+          checkOut: "06:00 PM",
           status:   "present",
+          isManual: false,
         });
         created++;
       } else {
@@ -131,10 +152,11 @@ const seedAttendance = async (users) => {
 
   console.log(`   ✅ Created ${created} attendance records`);
   if (skipped > 0) console.log(`   ⚠️  Skipped ${skipped} existing records`);
+  console.log(`   ℹ️  Today's attendance NOT seeded — users must check in manually`);
 };
 
 /* ============================================================
-   SEED LEAVES — with proper emergency + role-based flow
+   SEED LEAVES
    ============================================================ */
 const seedLeaves = async (users) => {
   console.log("\n🌴  Seeding Leave Requests...");
@@ -153,7 +175,6 @@ const seedLeaves = async (users) => {
   const david    = users.find((u) => u.email === "david@quibotech.com");
 
   const leaves = [
-    /* ── EMPLOYEE normal leave → starts at pending_manager ── */
     {
       userId:      employee._id,
       type:        "Sick Leave",
@@ -167,8 +188,6 @@ const seedLeaves = async (users) => {
       status:      "pending_manager",
       appliedAt:   new Date(),
     },
-
-    /* ── EMPLOYEE normal leave → already moved to pending_hr ── */
     {
       userId:             employee._id,
       type:               "Casual Leave",
@@ -183,8 +202,6 @@ const seedLeaves = async (users) => {
       approvedByManager:  manager._id,
       appliedAt:          new Date(),
     },
-
-    /* ── EMPLOYEE normal leave → already moved to pending_admin ── */
     {
       userId:            sara._id,
       type:              "Annual Leave",
@@ -200,8 +217,6 @@ const seedLeaves = async (users) => {
       approvedByHR:      hr._id,
       appliedAt:         new Date(),
     },
-
-    /* ── EMPLOYEE normal leave → fully approved by admin ── */
     {
       userId:            david._id,
       type:              "Earned Leave",
@@ -218,8 +233,6 @@ const seedLeaves = async (users) => {
       approvedByAdmin:   admin._id,
       appliedAt:         new Date(),
     },
-
-    /* ── EMPLOYEE emergency leave → approved by manager only ── */
     {
       userId:            employee._id,
       type:              "Emergency Leave",
@@ -235,8 +248,6 @@ const seedLeaves = async (users) => {
       approvedByManager: manager._id,
       appliedAt:         new Date(),
     },
-
-    /* ── EMPLOYEE emergency leave → still pending with manager ── */
     {
       userId:           sara._id,
       type:             "Emergency Leave",
@@ -251,8 +262,6 @@ const seedLeaves = async (users) => {
       status:           "pending_manager",
       appliedAt:        new Date(),
     },
-
-    /* ── REJECTED leave ── */
     {
       userId:      david._id,
       type:        "Sick Leave",
@@ -268,8 +277,6 @@ const seedLeaves = async (users) => {
       rejectedAt:  new Date(),
       appliedAt:   new Date(),
     },
-
-    /* ── MANAGER applying leave → goes straight to pending_admin ── */
     {
       userId:      manager._id,
       type:        "Casual Leave",
@@ -283,8 +290,6 @@ const seedLeaves = async (users) => {
       status:      "pending_admin",
       appliedAt:   new Date(),
     },
-
-    /* ── HR applying leave → goes straight to pending_admin ── */
     {
       userId:      hr._id,
       type:        "Earned Leave",
@@ -532,10 +537,8 @@ const seedPayroll = async (users) => {
 
   for (const user of employees) {
     const salary = salaryMap[user.role] || salaryMap.employee;
-
     for (const month of months) {
       const isProcessed = month !== "2026-03";
-
       records.push({
         userId:      user._id,
         month,
@@ -811,18 +814,17 @@ const seedDailyStatus = async (users) => {
     return;
   }
 
-  const manager  = users.find((u) => u.role === "manager");
-  const employee = users.find((u) => u.email === "employee@quibotech.com");
-  const sara     = users.find((u) => u.email === "sara@quibotech.com");
-  const david    = users.find((u) => u.email === "david@quibotech.com");
-
-  const today     = new Date().toISOString().split("T")[0];
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+  const manager    = users.find((u) => u.role === "manager");
+  const employee   = users.find((u) => u.email === "employee@quibotech.com");
+  const sara       = users.find((u) => u.email === "sara@quibotech.com");
+  const david      = users.find((u) => u.email === "david@quibotech.com");
+  const yesterday  = new Date(Date.now() - 1 * 86400000).toISOString().split("T")[0];
+  const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0];
 
   const statuses = [
     {
       userId:       employee._id,
-      date:         today,
+      date:         yesterday,
       status:       "On Track",
       achievements: "Completed login page UI and integrated JWT token handling",
       blockers:     "None",
@@ -837,7 +839,7 @@ const seedDailyStatus = async (users) => {
     },
     {
       userId:          sara._id,
-      date:            today,
+      date:            yesterday,
       status:          "In Progress",
       achievements:    "Completed admin dashboard layout with sidebar navigation",
       blockers:        "Waiting for design approval on color scheme",
@@ -846,7 +848,7 @@ const seedDailyStatus = async (users) => {
     },
     {
       userId:       david._id,
-      date:         today,
+      date:         yesterday,
       status:       "Blocked",
       achievements: "Completed attendance and leave APIs with full CRUD",
       blockers:     "Need database schema clarification for payroll deductions",
@@ -861,7 +863,7 @@ const seedDailyStatus = async (users) => {
     },
     {
       userId:          employee._id,
-      date:            yesterday,
+      date:            twoDaysAgo,
       status:          "Completed",
       achievements:    "Set up project structure and configured environment",
       blockers:        "None",
@@ -870,7 +872,7 @@ const seedDailyStatus = async (users) => {
     },
     {
       userId:          sara._id,
-      date:            yesterday,
+      date:            twoDaysAgo,
       status:          "On Track",
       achievements:    "Created wireframes and component structure for dashboard",
       blockers:        "None",
@@ -895,23 +897,22 @@ const seedTimesheets = async (users) => {
     return;
   }
 
-  const employee = users.find((u) => u.email === "employee@quibotech.com");
-  const sara     = users.find((u) => u.email === "sara@quibotech.com");
-  const david    = users.find((u) => u.email === "david@quibotech.com");
-
-  const today      = new Date().toISOString().split("T")[0];
-  const yesterday  = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-  const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0];
+  const employee     = users.find((u) => u.email === "employee@quibotech.com");
+  const sara         = users.find((u) => u.email === "sara@quibotech.com");
+  const david        = users.find((u) => u.email === "david@quibotech.com");
+  const yesterday    = new Date(Date.now() - 1 * 86400000).toISOString().split("T")[0];
+  const twoDaysAgo   = new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0];
+  const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split("T")[0];
 
   const timesheets = [
-    { employeeId: employee._id, employeeName: employee.name, hours: 8,   date: today,      status: "pending"  },
-    { employeeId: sara._id,     employeeName: sara.name,     hours: 7.5, date: today,      status: "pending"  },
-    { employeeId: david._id,    employeeName: david.name,    hours: 9,   date: today,      status: "pending"  },
-    { employeeId: employee._id, employeeName: employee.name, hours: 8,   date: yesterday,  status: "approved" },
-    { employeeId: sara._id,     employeeName: sara.name,     hours: 8,   date: yesterday,  status: "approved" },
-    { employeeId: david._id,    employeeName: david.name,    hours: 8.5, date: yesterday,  status: "approved" },
-    { employeeId: employee._id, employeeName: employee.name, hours: 7,   date: twoDaysAgo, status: "rejected" },
-    { employeeId: sara._id,     employeeName: sara.name,     hours: 8,   date: twoDaysAgo, status: "approved" },
+    { employeeId: employee._id, employeeName: employee.name, hours: 8,   date: yesterday,    status: "pending"  },
+    { employeeId: sara._id,     employeeName: sara.name,     hours: 7.5, date: yesterday,    status: "pending"  },
+    { employeeId: david._id,    employeeName: david.name,    hours: 9,   date: yesterday,    status: "pending"  },
+    { employeeId: employee._id, employeeName: employee.name, hours: 8,   date: twoDaysAgo,   status: "approved" },
+    { employeeId: sara._id,     employeeName: sara.name,     hours: 8,   date: twoDaysAgo,   status: "approved" },
+    { employeeId: david._id,    employeeName: david.name,    hours: 8.5, date: twoDaysAgo,   status: "approved" },
+    { employeeId: employee._id, employeeName: employee.name, hours: 7,   date: threeDaysAgo, status: "rejected" },
+    { employeeId: sara._id,     employeeName: sara.name,     hours: 8,   date: threeDaysAgo, status: "approved" },
   ];
 
   await Timesheet.insertMany(timesheets);
@@ -1075,6 +1076,10 @@ const seed = async () => {
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     await connectDB();
+
+    // ✅ Always runs first — removes any today's seeded attendance
+    // so users always start with "Not Checked In" on login
+    await cleanTodayAttendance();
 
     const users   = await seedUsers();
     await seedAttendance(users);
