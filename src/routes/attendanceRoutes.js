@@ -12,6 +12,11 @@ router.post("/checkout",      ctrl.checkOut);
 router.get("/today",          ctrl.getTodayAttendance);
 router.get("/my",             ctrl.getMyAttendance);
 
+/* ── Admin / HR ── */
+router.get("/users-list",     authorize("admin", "hr"), ctrl.getAllUsersList);
+router.post("/admin-checkin/:userId",  authorize("admin", "hr"), ctrl.adminCheckInForUser);
+router.post("/admin-checkout/:userId", authorize("admin", "hr"), ctrl.adminCheckOutForUser);
+
 /* ── Admin / HR / Manager ── */
 router.get("/today-all",      authorize("admin", "hr", "manager"), ctrl.getTodayAll);
 router.get("/all",            authorize("admin", "hr", "manager"), ctrl.getAllAttendance);
