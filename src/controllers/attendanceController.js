@@ -2,6 +2,7 @@
 "use strict";
 
 const Attendance = require("../models/Attendance");
+const User       = require("../models/User");
 
 /* ============================================================
    IST TIME HELPERS
@@ -57,14 +58,16 @@ const eachDay = (startStr, endStr) => {
 
 /* ============================================================
    CHECK IN — Manual only, user must click the button
+   Supports Employee, HR, Admin, Manager
+   Accepts optional { tagline } in request body — stored to MongoDB
    POST /api/attendance/checkin
    ============================================================ */
 const checkIn = async (req, res) => {
   try {
     const today   = todayStr();
     const timeNow = nowTimeStr();
+    const tagline = (req.body?.tagline ?? "").toString().trim().slice(0, 200);
 
-    // Check if already checked in today
     const existing = await Attendance.findOne({
       userId:   req.user._id,
       date:     today,
@@ -79,18 +82,21 @@ const checkIn = async (req, res) => {
       });
     }
 
-    // Create new check-in record in MongoDB
     const record = await Attendance.create({
       userId:   req.user._id,
       date:     today,
       checkIn:  timeNow,
+      tagline:  tagline || undefined,
       status:   "present",
       isManual: false,
     });
 
     await record.populate("userId", "name email role");
 
-    console.log(`✅ Manual CheckIn → user: ${req.user.name} | date: ${today} | time: ${timeNow}`);
+    console.log(
+      `✅ CheckIn → user: ${req.user.name} (${req.user.role}) | date: ${today} | time: ${timeNow}` +
+      (tagline ? ` | tagline: "${tagline}"` : "")
+    );
 
     res.status(201).json({
       success: true,
@@ -137,7 +143,7 @@ const checkOut = async (req, res) => {
       });
     }
 
-    console.log(`✅ Manual CheckOut → user: ${req.user.name} | date: ${today} | time: ${timeNow}`);
+    console.log(`✅ CheckOut → user: ${req.user.name} (${req.user.role}) | date: ${today} | time: ${timeNow}`);
 
     res.status(200).json({
       success: true,
@@ -146,6 +152,111 @@ const checkOut = async (req, res) => {
     });
   } catch (err) {
     console.error("checkOut error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
+   ADMIN / HR — CHECK IN FOR A SPECIFIC USER
+   POST /api/attendance/admin-checkin/:userId
+   Body: { tagline? }
+   ============================================================ */
+const adminCheckInForUser = async (req, res) => {
+  try {
+    const today   = todayStr();
+    const timeNow = nowTimeStr();
+    const tagline = (req.body?.tagline ?? "").toString().trim().slice(0, 200);
+
+    const targetUser = await User.findById(req.params.userId).select("name email role");
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    const existing = await Attendance.findOne({
+      userId:   targetUser._id,
+      date:     today,
+      isManual: false,
+    });
+
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        message: `${targetUser.name} has already checked in today.`,
+        record:  existing,
+      });
+    }
+
+    const record = await Attendance.create({
+      userId:   targetUser._id,
+      date:     today,
+      checkIn:  timeNow,
+      tagline:  tagline || undefined,
+      status:   "present",
+      isManual: false,
+    });
+
+    await record.populate("userId", "name email role");
+
+    console.log(
+      `✅ AdminCheckIn → target: ${targetUser.name} (${targetUser.role}) | by: ${req.user.name} (${req.user.role}) | time: ${timeNow}` +
+      (tagline ? ` | tagline: "${tagline}"` : "")
+    );
+
+    res.status(201).json({
+      success: true,
+      message: `Checked in ${targetUser.name} at ${timeNow}`,
+      record,
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "User already checked in today.",
+      });
+    }
+    console.error("adminCheckInForUser error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
+   ADMIN / HR — CHECK OUT FOR A SPECIFIC USER
+   POST /api/attendance/admin-checkout/:userId
+   ============================================================ */
+const adminCheckOutForUser = async (req, res) => {
+  try {
+    const today   = todayStr();
+    const timeNow = nowTimeStr();
+
+    const targetUser = await User.findById(req.params.userId).select("name email role");
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    const record = await Attendance.findOneAndUpdate(
+      { userId: targetUser._id, date: today, isManual: false },
+      { checkOut: timeNow },
+      { new: true }
+    ).populate("userId", "name email role");
+
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: `${targetUser.name} has not checked in today.`,
+      });
+    }
+
+    console.log(
+      `✅ AdminCheckOut → target: ${targetUser.name} (${targetUser.role}) | by: ${req.user.name} (${req.user.role}) | time: ${timeNow}`
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Checked out ${targetUser.name} at ${timeNow}`,
+      record,
+    });
+  } catch (err) {
+    console.error("adminCheckOutForUser error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -178,12 +289,29 @@ const getTodayAll = async (req, res) => {
       date:     todayStr(),
       isManual: false,
     })
-      .populate("userId", "name email role department")
+      .populate("userId", "name email role department designation")
       .sort({ checkIn: 1 });
 
     res.status(200).json({ success: true, total: records.length, records });
   } catch (err) {
     console.error("getTodayAll error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
+   GET ALL USERS LIST — Admin / HR (for admin panel check-in/out)
+   GET /api/attendance/users-list
+   ============================================================ */
+const getAllUsersList = async (req, res) => {
+  try {
+    const users = await User.find({ isActive: true })
+      .select("name email role department designation avatar")
+      .sort({ name: 1 });
+
+    res.status(200).json({ success: true, total: users.length, users });
+  } catch (err) {
+    console.error("getAllUsersList error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -212,7 +340,7 @@ const getMyAttendance = async (req, res) => {
 const getAllAttendance = async (req, res) => {
   try {
     const records = await Attendance.find()
-      .populate("userId",    "name email role department")
+      .populate("userId",    "name email role department designation")
       .populate("enteredBy", "name")
       .sort({ date: -1 });
     res.status(200).json({ success: true, total: records.length, records });
@@ -223,7 +351,7 @@ const getAllAttendance = async (req, res) => {
 };
 
 /* ============================================================
-   ADD MANUAL ATTENDANCE — Admin only (for previous dates)
+   ADD MANUAL ATTENDANCE — Admin only
    POST /api/attendance/manual
    ============================================================ */
 const addManualAttendance = async (req, res) => {
@@ -235,6 +363,7 @@ const addManualAttendance = async (req, res) => {
       endDate,
       checkIn,
       checkOut,
+      tagline,
     } = req.body;
 
     if (!employeeName || !employeeRole || !startDate || !endDate || !checkIn) {
@@ -262,6 +391,7 @@ const addManualAttendance = async (req, res) => {
 
     const checkInFormatted  = to12Hour(checkIn);
     const checkOutFormatted = checkOut ? to12Hour(checkOut) : null;
+    const taglineTrimmed    = (tagline ?? "").toString().trim().slice(0, 200) || undefined;
 
     const days = eachDay(startDate, endDate);
 
@@ -270,6 +400,7 @@ const addManualAttendance = async (req, res) => {
         date,
         checkIn:            checkInFormatted,
         checkOut:           checkOutFormatted,
+        tagline:            taglineTrimmed,
         status:             "present",
         isManual:           true,
         manualEmployeeName: employeeName.trim(),
@@ -279,7 +410,11 @@ const addManualAttendance = async (req, res) => {
       }))
     );
 
-    console.log(`✅ Manual Attendance saved → ${records.length} record(s) | employee: ${employeeName} | ${startDate} to ${endDate} | by: ${req.user.name}`);
+    console.log(
+      `✅ Manual Attendance saved → ${records.length} record(s) | employee: ${employeeName}` +
+      ` | ${startDate} to ${endDate} | by: ${req.user.name}` +
+      (taglineTrimmed ? ` | tagline: "${taglineTrimmed}"` : "")
+    );
 
     res.status(201).json({
       success: true,
@@ -341,6 +476,9 @@ const deleteManualAttendance = async (req, res) => {
 module.exports = {
   checkIn,
   checkOut,
+  adminCheckInForUser,
+  adminCheckOutForUser,
+  getAllUsersList,
   getTodayAttendance,
   getTodayAll,
   getMyAttendance,
