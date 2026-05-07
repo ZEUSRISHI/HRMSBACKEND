@@ -16,6 +16,14 @@ const attendanceSchema = new mongoose.Schema(
       default: "present",
     },
 
+    /* ── Tagline — optional motivational note set at check-in ── */
+    tagline: {
+      type:      String,
+      default:   "",
+      maxlength: 200,
+      trim:      true,
+    },
+
     /* ── Manual entry fields (admin only) ── */
     isManual:           { type: Boolean, default: false },
     manualEmployeeName: { type: String },
@@ -29,8 +37,6 @@ const attendanceSchema = new mongoose.Schema(
 /*
   Unique index only for REAL (non-manual) records.
   Manual records have no userId so they never clash with this index.
-  This prevents "already checked in today" duplicates for real users
-  while allowing unlimited manual entries.
 */
 attendanceSchema.index(
   { userId: 1, date: 1 },
