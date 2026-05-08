@@ -21,6 +21,9 @@ const onboardingRoutes  = require("./routes/onboardingRoutes");
 const helpdeskRoutes    = require("./routes/helpdeskRoutes");
 const userRoutes        = require("./routes/userRoutes");
 
+// ADD THIS
+const messageRoutes     = require("./routes/messageRoutes");
+
 const app = express();
 
 /* ============================================================
@@ -97,7 +100,7 @@ const apiLimiter = rateLimit({
 });
 
 app.use("/api/auth", authLimiter);
-app.use("/api",      apiLimiter);
+app.use("/api", apiLimiter);
 
 /* ============================================================
    ROUTES
@@ -119,6 +122,9 @@ app.use("/api/freelancers",  freelancerRoutes);
 app.use("/api/onboarding",   onboardingRoutes);
 app.use("/api/helpdesk",     helpdeskRoutes);
 app.use("/api/users",        userRoutes);
+
+// ADD THIS
+app.use("/api/messages",     messageRoutes);
 
 /* ============================================================
    HEALTH CHECK
@@ -165,11 +171,15 @@ app.use((err, req, res, next) => {
   console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
   if (err.message && err.message.includes("CORS")) {
-    return res.status(403).json({ success: false, message: err.message });
+    return res.status(403).json({
+      success: false,
+      message: err.message,
+    });
   }
 
   if (err.name === "ValidationError") {
     const messages = Object.values(err.errors).map((e) => e.message);
+
     return res.status(422).json({
       success: false,
       message: "Validation failed",
@@ -179,6 +189,7 @@ app.use((err, req, res, next) => {
 
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue)[0];
+
     return res.status(409).json({
       success: false,
       message: `${field} already exists.`,
@@ -186,7 +197,10 @@ app.use((err, req, res, next) => {
   }
 
   if (err.name === "JsonWebTokenError") {
-    return res.status(401).json({ success: false, message: "Invalid token." });
+    return res.status(401).json({
+      success: false,
+      message: "Invalid token.",
+    });
   }
 
   if (err.name === "TokenExpiredError") {
