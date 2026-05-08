@@ -37,7 +37,7 @@ app.set("trust proxy", 1);
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  "https://enchanting-queijadas-dc4703.netlify.app", // ← no trailing slash
+  "https://hrms-3ciq.vercel.app/", // ← no trailing slash
 ];
 
 const corsOptions = {
