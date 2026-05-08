@@ -1,6 +1,5 @@
-// routes/messageRoutes.js
 const express = require("express");
-const router = express.Router();
+const router  = express.Router();
 const {
   getUsers,
   getOrCreateDirect,
@@ -15,24 +14,21 @@ const { protect, authorize } = require("../middleware/auth");
 
 router.use(protect);
 
-// Users list (to start a chat)
+// ── Users list ──────────────────────────────
 router.get("/users", getUsers);
 
-// Conversations
-router.get("/conversations", getMyConversations);
-router.post("/conversations/direct", getOrCreateDirect);
-router.post(
-  "/conversations/group",
-  authorize("admin", "manager"),
-  createGroup
-);
-
-// Messages inside a conversation
-router.get("/conversations/:conversationId/messages", getMessages);
-router.post("/conversations/:conversationId/messages", sendMessage);
-router.delete("/messages/:messageId", deleteMessage);
-
-// Unread badge count
+// ── Unread count ────────────────────────────
 router.get("/unread-count", getUnreadCount);
+
+// ── Conversations ───────────────────────────
+// IMPORTANT: specific routes BEFORE param routes
+router.get("/conversations",                        getMyConversations);
+router.post("/conversations/direct",                getOrCreateDirect);
+router.post("/conversations/group", authorize("admin", "manager"), createGroup);
+
+// ── Messages ────────────────────────────────
+router.get("/conversations/:conversationId/messages",  getMessages);
+router.post("/conversations/:conversationId/messages", sendMessage);
+router.delete("/messages/:messageId",                  deleteMessage);
 
 module.exports = router;
