@@ -364,6 +364,7 @@ const addManualAttendance = async (req, res) => {
       checkIn,
       checkOut,
       tagline,
+      userId,        // ← ADDED
     } = req.body;
 
     if (!employeeName || !employeeRole || !startDate || !endDate || !checkIn) {
@@ -373,21 +374,12 @@ const addManualAttendance = async (req, res) => {
       });
     }
 
-    const today = todayStr();
-
-    if (endDate >= today) {
-      return res.status(400).json({
-        success: false,
-        message: "Manual entry is only allowed for previous dates (not today or future).",
-      });
-    }
-
     if (startDate > endDate) {
-      return res.status(400).json({
-        success: false,
-        message: "startDate cannot be after endDate.",
-      });
-    }
+  return res.status(400).json({
+    success: false,
+    message: "startDate cannot be after endDate.",
+  });
+}
 
     const checkInFormatted  = to12Hour(checkIn);
     const checkOutFormatted = checkOut ? to12Hour(checkOut) : null;
@@ -398,6 +390,7 @@ const addManualAttendance = async (req, res) => {
     const records = await Attendance.insertMany(
       days.map((date) => ({
         date,
+        userId:             userId || undefined,   // ← ADDED
         checkIn:            checkInFormatted,
         checkOut:           checkOutFormatted,
         tagline:            taglineTrimmed,
@@ -435,6 +428,7 @@ const getManualAttendance = async (req, res) => {
   try {
     const records = await Attendance.find({ isManual: true })
       .populate("enteredBy", "name")
+      .populate("userId",    "name role")   // ← populate userId so frontend gets name/role
       .sort({ date: -1 });
     res.status(200).json({ success: true, total: records.length, records });
   } catch (err) {
