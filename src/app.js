@@ -21,8 +21,11 @@ const onboardingRoutes  = require("./routes/onboardingRoutes");
 const helpdeskRoutes    = require("./routes/helpdeskRoutes");
 const userRoutes        = require("./routes/userRoutes");
 
-// ADD THIS
+// ✅ EXISTING
 const messageRoutes     = require("./routes/messageRoutes");
+
+// ✅ NEW EMAIL COMM ROUTE
+const emailCommRoutes   = require("./routes/emailCommRoutes");
 
 const app = express();
 
@@ -37,12 +40,11 @@ app.set("trust proxy", 1);
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  "https://hrmsquibotech.vercel.app", // ← no trailing slash
+  "https://hrmsquibotech.vercel.app",
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow Postman / mobile / server-to-server (no origin header)
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) return callback(null, true);
@@ -55,10 +57,7 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
-// Handle preflight BEFORE all other middleware
 app.options("*", cors(corsOptions));
-
-// Apply CORS to all routes
 app.use(cors(corsOptions));
 
 /* ============================================================
@@ -123,8 +122,11 @@ app.use("/api/onboarding",   onboardingRoutes);
 app.use("/api/helpdesk",     helpdeskRoutes);
 app.use("/api/users",        userRoutes);
 
-// ADD THIS
+// ✅ EXISTING
 app.use("/api/messages",     messageRoutes);
+
+// ✅ NEW EMAIL COMM ROUTE
+app.use("/api/email-comm",   emailCommRoutes);
 
 /* ============================================================
    HEALTH CHECK
