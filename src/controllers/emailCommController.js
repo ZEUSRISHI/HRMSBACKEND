@@ -1,19 +1,156 @@
-// controllers/emailCommController.js
 "use strict";
 
 const nodemailer = require("nodemailer");
+const https      = require("https");
 const User       = require("../models/User");
 const EmailLog   = require("../models/EmailLog");
 
 /* ============================================================
+   BUILD RAW RFC 2822 MESSAGE (for Gmail API)
+   ============================================================ */
+function buildRawMessage({ from, to, cc, subject, html, text }) {
+  const boundary = `boundary_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const toHeader = Array.isArray(to) ? to.join(", ") : to;
+  const ccHeader = cc && cc.length ? cc.join(", ") : null;
+
+  const raw = [
+    `From: ${from}`,
+    `To: ${toHeader}`,
+    ccHeader ? `Cc: ${ccHeader}` : null,
+    `Subject: ${subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/plain; charset=UTF-8`,
+    ``,
+    text,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/html; charset=UTF-8`,
+    ``,
+    html,
+    ``,
+    `--${boundary}--`,
+  ]
+    .filter((line) => line !== null)
+    .join("\r\n");
+
+  return Buffer.from(raw)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/* ============================================================
+   GET GMAIL OAUTH2 ACCESS TOKEN
+   ============================================================ */
+async function getAccessToken() {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      client_id:     process.env.GMAIL_CLIENT_ID,
+      client_secret: process.env.GMAIL_CLIENT_SECRET,
+      refresh_token: process.env.GMAIL_REFRESH_TOKEN,
+      grant_type:    "refresh_token",
+    });
+
+    const options = {
+      hostname: "oauth2.googleapis.com",
+      path:     "/token",
+      method:   "POST",
+      headers: {
+        "Content-Type":   "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.access_token) {
+            resolve(parsed.access_token);
+          } else {
+            reject(new Error(`Token error: ${data}`));
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+/* ============================================================
+   SEND VIA GMAIL REST API
+   Pure HTTPS port 443 — works on Render free tier
+   ============================================================ */
+async function sendViaGmailAPI({ from, to, cc = [], subject, html, text }) {
+  const accessToken = await getAccessToken();
+
+  const rawMessage = buildRawMessage({
+    from,
+    to:      Array.isArray(to) ? to : [to],
+    cc,
+    subject,
+    html,
+    text,
+  });
+
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ raw: rawMessage });
+
+    const options = {
+      hostname: "gmail.googleapis.com",
+      path:     "/gmail/v1/users/me/messages/send",
+      method:   "POST",
+      headers: {
+        Authorization:    `Bearer ${accessToken}`,
+        "Content-Type":   "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(parsed);
+          } else {
+            reject(new Error(`Gmail API error ${res.statusCode}: ${data}`));
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+/* ============================================================
    NODEMAILER TRANSPORTER
-   - Local (.env SMTP_PORT=465): uses SSL, works on your machine
-   - Render (.env SMTP_PORT=587): uses STARTTLS, works on Render
+   Used only in local development
    ============================================================ */
 function getTransporter() {
   const pass = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s/g, "");
   if (!process.env.GMAIL_USER || !pass) {
-    throw new Error("GMAIL_USER or GMAIL_APP_PASSWORD environment variable is not set");
+    throw new Error(
+      "GMAIL_USER or GMAIL_APP_PASSWORD environment variable is not set"
+    );
   }
 
   const port   = parseInt(process.env.SMTP_PORT || "587", 10);
@@ -33,17 +170,53 @@ function getTransporter() {
     connectionTimeout: 15000,
     greetingTimeout:   15000,
     socketTimeout:     20000,
-    // ✅ Force IPv4 — fixes ENETUNREACH on Render free tier
     family: 4,
   });
+}
+
+/* ============================================================
+   UNIFIED SEND FUNCTION
+   Production  → Gmail REST API (HTTPS port 443, never blocked)
+   Local dev   → Nodemailer SMTP (port 465/587)
+   ============================================================ */
+async function sendMail({ from, to, cc = [], subject, html, text }) {
+  const isProduction = process.env.NODE_ENV === "production";
+  const hasOAuth =
+    process.env.GMAIL_CLIENT_ID &&
+    process.env.GMAIL_CLIENT_SECRET &&
+    process.env.GMAIL_REFRESH_TOKEN;
+
+  if (isProduction && hasOAuth) {
+    return sendViaGmailAPI({ from, to, cc, subject, html, text });
+  } else {
+    const transporter = getTransporter();
+    return transporter.sendMail({
+      from,
+      to:      Array.isArray(to) ? to.join(", ") : to,
+      cc:      cc.length ? cc.join(", ") : undefined,
+      subject,
+      html,
+      text,
+    });
+  }
 }
 
 /* ============================================================
    TEST CONNECTION
    ============================================================ */
 async function testGmailConnection() {
-  const transporter = getTransporter();
-  await transporter.verify();
+  const isProduction = process.env.NODE_ENV === "production";
+  const hasOAuth =
+    process.env.GMAIL_CLIENT_ID &&
+    process.env.GMAIL_CLIENT_SECRET &&
+    process.env.GMAIL_REFRESH_TOKEN;
+
+  if (isProduction && hasOAuth) {
+    await getAccessToken();
+  } else {
+    const transporter = getTransporter();
+    await transporter.verify();
+  }
 }
 
 /* ============================================================
@@ -72,14 +245,18 @@ function buildTemplate({
 
   const initials = senderName
     .split(" ")
-    .map(n => n[0])
+    .map((n) => n[0])
     .join("")
     .toUpperCase()
     .slice(0, 2);
 
   const now = new Date().toLocaleString("en-IN", {
-    day: "numeric", month: "long", year: "numeric",
-    hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata",
+    day:      "numeric",
+    month:    "long",
+    year:     "numeric",
+    hour:     "2-digit",
+    minute:   "2-digit",
+    timeZone: "Asia/Kolkata",
   });
 
   return `<!DOCTYPE html>
@@ -307,47 +484,58 @@ exports.sendEmail = async (req, res) => {
 
     const senderName  = req.user?.name || "HRMS Admin";
     const senderRole  = req.user?.role || "admin";
-    const transporter = getTransporter();
+    const fromAddress = `"${process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS"}" <${process.env.GMAIL_USER}>`;
 
     const recipientDocs = await User.find({ email: { $in: to } }).select("name email");
-    const nameMap = Object.fromEntries(recipientDocs.map(u => [u.email, u.name]));
+    const nameMap = Object.fromEntries(recipientDocs.map((u) => [u.email, u.name]));
 
     let lastMsgId = "";
+
     for (const email of to) {
       const recipientName = nameMap[email] || email.split("@")[0];
 
-      const info = await transporter.sendMail({
-        from:    `"${process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS"}" <${process.env.GMAIL_USER}>`,
+      const info = await sendMail({
+        from:    fromAddress,
         to:      email,
-        cc:      cc.length ? cc.join(", ") : undefined,
+        cc,
         subject: `[Quibo HRMS] ${subject}`,
         html:    buildTemplate({ recipientName, senderName, senderRole, subject, body, priority, isTeam: false }),
         text:    `Hi ${recipientName},\n\n${body}\n\n— ${senderName} (${senderRole})\nQuibo Tech HRMS`,
       });
 
-      lastMsgId = info.messageId || "";
+      lastMsgId = info?.id || info?.messageId || "";
     }
 
     await EmailLog.create({
-      sentBy: req.user._id, type: "direct",
-      to, cc, subject, body, priority,
-      status: "sent", messageId: lastMsgId,
+      sentBy:    req.user._id,
+      type:      "direct",
+      to,
+      cc,
+      subject,
+      body,
+      priority,
+      status:    "sent",
+      messageId: lastMsgId,
     });
 
     res.json({
-      success: true,
-      message: `Email sent to ${to.length} recipient(s)`,
+      success:        true,
+      message:        `Email sent to ${to.length} recipient(s)`,
       recipientCount: to.length,
-      messageId: lastMsgId,
+      messageId:      lastMsgId,
     });
   } catch (err) {
     console.error("Send email error:", err.message);
     try {
       await EmailLog.create({
-        sentBy: req.user._id, type: "direct",
-        to: req.body.to || [], subject: req.body.subject || "",
-        body: req.body.body || "", priority: req.body.priority || "normal",
-        status: "failed", error: err.message,
+        sentBy:   req.user._id,
+        type:     "direct",
+        to:       req.body.to || [],
+        subject:  req.body.subject || "",
+        body:     req.body.body || "",
+        priority: req.body.priority || "normal",
+        status:   "failed",
+        error:    err.message,
       });
     } catch (_) {}
     res.status(500).json({ success: false, message: err.message || "Failed to send email" });
@@ -371,12 +559,13 @@ exports.sendToTeam = async (req, res) => {
 
     const senderName  = req.user?.name || "HRMS Admin";
     const senderRole  = req.user?.role || "admin";
-    const transporter = getTransporter();
+    const fromAddress = `"${process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS"}" <${process.env.GMAIL_USER}>`;
 
     for (const user of recipients) {
-      await transporter.sendMail({
-        from:    `"${process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS"}" <${process.env.GMAIL_USER}>`,
+      await sendMail({
+        from:    fromAddress,
         to:      user.email,
+        cc:      [],
         subject: `[Quibo HRMS Broadcast] ${subject}`,
         html:    buildTemplate({ recipientName: user.name, senderName, senderRole, subject, body, priority, isTeam: true }),
         text:    `Hi ${user.name},\n\n${body}\n\n— ${senderName} (${senderRole})\nQuibo Tech HRMS`,
@@ -384,14 +573,19 @@ exports.sendToTeam = async (req, res) => {
     }
 
     await EmailLog.create({
-      sentBy: req.user._id, type: "team",
-      roles, to: recipients.map(u => u.email),
-      subject, body, priority, status: "sent",
+      sentBy:   req.user._id,
+      type:     "team",
+      roles,
+      to:       recipients.map((u) => u.email),
+      subject,
+      body,
+      priority,
+      status:   "sent",
     });
 
     res.json({
-      success: true,
-      message: `Email sent to ${recipients.length} team member(s)`,
+      success:        true,
+      message:        `Email sent to ${recipients.length} team member(s)`,
       recipientCount: recipients.length,
     });
   } catch (err) {
@@ -401,18 +595,33 @@ exports.sendToTeam = async (req, res) => {
 };
 
 /* ============================================================
-   TEST SMTP — with full error details for debugging
+   TEST SMTP / CONNECTION
    ============================================================ */
 exports.testSmtp = async (req, res) => {
   try {
-    const pass = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s/g, "");
-    if (!process.env.GMAIL_USER || !pass) {
-      return res.status(500).json({ success: false, message: "GMAIL_USER or GMAIL_APP_PASSWORD not set" });
+    const isProduction = process.env.NODE_ENV === "production";
+    const hasOAuth =
+      process.env.GMAIL_CLIENT_ID &&
+      process.env.GMAIL_CLIENT_SECRET &&
+      process.env.GMAIL_REFRESH_TOKEN;
+
+    if (isProduction && !hasOAuth) {
+      return res.status(500).json({
+        success: false,
+        message: "Production requires GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN",
+      });
     }
+
     await testGmailConnection();
-    res.json({ success: true, message: "Gmail SMTP connected successfully" });
+
+    res.json({
+      success: true,
+      message: isProduction
+        ? "Gmail API (OAuth2) connected successfully"
+        : "Gmail SMTP connected successfully",
+    });
   } catch (err) {
-    console.error("Gmail SMTP test failed:", err);
+    console.error("Gmail connection test failed:", err);
     res.status(500).json({
       success:      false,
       message:      err.message,
@@ -430,7 +639,7 @@ exports.testSmtp = async (req, res) => {
 exports.getLogs = async (req, res) => {
   try {
     const filter = req.user.role === "admin" ? {} : { sentBy: req.user._id };
-    const logs   = await EmailLog.find(filter)
+    const logs = await EmailLog.find(filter)
       .sort({ createdAt: -1 })
       .limit(100)
       .populate("sentBy", "name email role");
