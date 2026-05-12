@@ -17,7 +17,7 @@ function getTransporter() {
   }
 
   const port   = parseInt(process.env.SMTP_PORT || "587", 10);
-  const secure = port === 465; // true for 465 (SSL), false for 587 (STARTTLS)
+  const secure = port === 465;
 
   return nodemailer.createTransport({
     host:   "smtp.gmail.com",
@@ -33,6 +33,8 @@ function getTransporter() {
     connectionTimeout: 15000,
     greetingTimeout:   15000,
     socketTimeout:     20000,
+    // ✅ Force IPv4 — fixes ENETUNREACH on Render free tier
+    family: 4,
   });
 }
 
