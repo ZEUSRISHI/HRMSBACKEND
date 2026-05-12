@@ -6,19 +6,33 @@ const User       = require("../models/User");
 const EmailLog   = require("../models/EmailLog");
 
 /* ============================================================
-   NODEMAILER TRANSPORTER (Gmail)
+   NODEMAILER TRANSPORTER
+   - Local (.env SMTP_PORT=465): uses SSL, works on your machine
+   - Render (.env SMTP_PORT=587): uses STARTTLS, works on Render
    ============================================================ */
 function getTransporter() {
   const pass = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s/g, "");
   if (!process.env.GMAIL_USER || !pass) {
     throw new Error("GMAIL_USER or GMAIL_APP_PASSWORD environment variable is not set");
   }
+
+  const port   = parseInt(process.env.SMTP_PORT || "587", 10);
+  const secure = port === 465; // true for 465 (SSL), false for 587 (STARTTLS)
+
   return nodemailer.createTransport({
-    service: "gmail",
+    host:   "smtp.gmail.com",
+    port,
+    secure,
     auth: {
       user: process.env.GMAIL_USER,
       pass,
     },
+    tls: {
+      rejectUnauthorized: false,
+    },
+    connectionTimeout: 15000,
+    greetingTimeout:   15000,
+    socketTimeout:     20000,
   });
 }
 
@@ -81,7 +95,6 @@ function buildTemplate({
   </noscript>
   <![endif]-->
   <style>
-    /* ── Reset ── */
     * { box-sizing: border-box; }
     body, table, td, p, a, li, blockquote {
       -webkit-text-size-adjust: 100%;
@@ -91,7 +104,6 @@ function buildTemplate({
     img { border: 0; line-height: 100%; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
     body { margin: 0 !important; padding: 0 !important; background-color: #e2e8f0; width: 100% !important; }
 
-    /* ── Mobile Styles ── */
     @media only screen and (max-width: 600px) {
       .email-wrapper { width: 100% !important; }
       .email-container { width: 100% !important; max-width: 100% !important; }
@@ -136,29 +148,23 @@ function buildTemplate({
 </head>
 <body style="margin:0;padding:0;background-color:#e2e8f0;width:100%;">
 
-<!-- PREVIEW TEXT (hidden) -->
 <div style="display:none;font-size:1px;color:#e2e8f0;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
   ${isTeam ? "Team broadcast" : "New message"} from ${senderName} · Quibo Tech HRMS · ${subject}
 </div>
 
-<!-- OUTER WRAPPER -->
 <table class="email-wrapper" role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#e2e8f0;padding:24px 8px;">
 <tr><td align="center">
 
-  <!-- MAIN CONTAINER -->
   <table class="email-container" role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
-    <!-- TOP ACCENT LINE -->
     <tr>
       <td style="background:linear-gradient(90deg,#334155,#64748b,#94a3b8,#64748b,#334155);height:4px;font-size:0;line-height:0;">&nbsp;</td>
     </tr>
 
-    <!-- BRAND BAR -->
     <tr>
       <td class="brand-bar" style="background:linear-gradient(135deg,#334155 0%,#475569 100%);padding:20px 32px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            <!-- Logo + Name -->
             <td style="vertical-align:middle;">
               <table role="presentation" cellpadding="0" cellspacing="0">
                 <tr>
@@ -172,7 +178,6 @@ function buildTemplate({
                 </tr>
               </table>
             </td>
-            <!-- Badge -->
             <td align="right" style="vertical-align:middle;">
               <div class="badge-pill" style="display:inline-block;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:20px;padding:6px 12px;">
                 <span style="font-size:11px;color:rgba(255,255,255,0.95);font-weight:700;white-space:nowrap;">${isTeam ? "📢 BROADCAST" : "✉️ DIRECT"}</span>
@@ -183,7 +188,6 @@ function buildTemplate({
       </td>
     </tr>
 
-    <!-- PRIORITY BANNER -->
     ${pri.show ? `
     <tr>
       <td class="priority-banner" style="background:${pri.headerBg};padding:10px 32px;">
@@ -191,7 +195,6 @@ function buildTemplate({
       </td>
     </tr>` : ""}
 
-    <!-- SENDER HERO -->
     <tr>
       <td class="hero-section" style="background:linear-gradient(180deg,#475569 0%,#f1f5f9 100%);padding:28px 32px 0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
@@ -209,30 +212,24 @@ function buildTemplate({
       </td>
     </tr>
 
-    <!-- BODY CARD -->
     <tr>
       <td class="body-card" style="background:#ffffff;padding:32px 32px 28px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
 
-        <!-- Greeting -->
         <p class="greeting" style="margin:0 0 6px;font-size:22px;font-weight:800;color:#0f172a;line-height:1.25;">Hi ${recipientName} 👋</p>
         <p class="greeting-sub" style="margin:0 0 24px;font-size:13px;color:#64748b;line-height:1.5;">You have a new ${isTeam ? "broadcast" : "message"} from your team.</p>
 
-        <!-- Subject Box -->
         <div class="subject-box" style="background:linear-gradient(135deg,#f1f5f9,#e2e8f0);border:1px solid #cbd5e1;border-radius:12px;padding:14px 18px;margin-bottom:20px;">
           <p class="subject-label" style="margin:0 0 5px;font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:1.5px;">Subject</p>
           <p class="subject-text" style="margin:0;font-size:16px;font-weight:700;color:#1e293b;line-height:1.4;word-break:break-word;">${subject}</p>
         </div>
 
-        <!-- Message Box -->
         <div class="message-box" style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #475569;border-radius:0 12px 12px 0;padding:20px 20px 20px 18px;margin-bottom:24px;">
           <p class="message-label" style="margin:0 0 8px;font-size:9px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:1.5px;">Message</p>
           <p class="message-text" style="margin:0;font-size:14px;color:#334155;line-height:1.85;word-break:break-word;">${bodyHtml}</p>
         </div>
 
-        <!-- Divider -->
         <div style="height:1px;background:#f1f5f9;margin-bottom:20px;"></div>
 
-        <!-- Meta -->
         <table class="meta-table" role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr>
             <td class="meta-left" style="vertical-align:middle;">
@@ -250,7 +247,6 @@ function buildTemplate({
       </td>
     </tr>
 
-    <!-- FOOTER -->
     <tr>
       <td class="footer-section" style="background:#334155;padding:22px 32px;border-radius:0 0 16px 16px;border-left:1px solid rgba(148,163,184,0.15);border-right:1px solid rgba(148,163,184,0.15);border-bottom:1px solid rgba(148,163,184,0.15);">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
@@ -268,17 +264,14 @@ function buildTemplate({
       </td>
     </tr>
 
-    <!-- BOTTOM ACCENT LINE -->
     <tr>
       <td style="background:linear-gradient(90deg,#334155,#64748b,#94a3b8,#64748b,#334155);height:3px;font-size:0;line-height:0;">&nbsp;</td>
     </tr>
 
   </table>
-  <!-- END MAIN CONTAINER -->
 
 </td></tr>
 </table>
-<!-- END OUTER WRAPPER -->
 
 </body>
 </html>`;
@@ -406,7 +399,7 @@ exports.sendToTeam = async (req, res) => {
 };
 
 /* ============================================================
-   TEST SMTP
+   TEST SMTP — with full error details for debugging
    ============================================================ */
 exports.testSmtp = async (req, res) => {
   try {
@@ -417,8 +410,15 @@ exports.testSmtp = async (req, res) => {
     await testGmailConnection();
     res.json({ success: true, message: "Gmail SMTP connected successfully" });
   } catch (err) {
-    console.error("Gmail SMTP test failed:", err.message);
-    res.status(500).json({ success: false, message: `SMTP Error: ${err.message}` });
+    console.error("Gmail SMTP test failed:", err);
+    res.status(500).json({
+      success:      false,
+      message:      err.message,
+      code:         err.code         || null,
+      command:      err.command      || null,
+      responseCode: err.responseCode || null,
+      response:     err.response     || null,
+    });
   }
 };
 
