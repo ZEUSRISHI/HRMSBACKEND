@@ -1,4 +1,4 @@
-process.env.TZ = "Asia/Kolkata"; // ← ADD THIS AS FIRST LINE
+process.env.TZ = "Asia/Kolkata"; // ← ADDED AS FIRST LINE
 
 require("dotenv").config();
 const app       = require("./app");
@@ -152,6 +152,13 @@ const startServer = async () => {
       console.log("   DELETE /api/helpdesk/:id");
       console.log("   POST   /api/helpdesk/:id/comments");
       console.log("   DELETE /api/helpdesk/:id/comments/:commentId");
+
+      // ✅ EMAIL COMMUNICATION LOGS ADDED
+      console.log("\n📧  EMAIL COMMUNICATION");
+      console.log("   GET    /api/email-comm/directory");
+      console.log("   POST   /api/email-comm/send");
+      console.log("   POST   /api/email-comm/send-team");
+      console.log("   GET    /api/email-comm/test-smtp  (admin)");
 
       console.log("\n❤️   HEALTH");
       console.log("   GET    /api/health");
