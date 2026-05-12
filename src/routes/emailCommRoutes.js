@@ -14,17 +14,16 @@ router.post("/send-team", authorize("admin","manager","hr"), sendToTeam);
 router.get("/test-smtp",  authorize("admin"),                testSmtp);
 router.get("/logs",                                          getLogs);
 
-// ── TEMPORARY DEBUG (remove after fixing env vars on Render) ──
+// ── DEBUG (remove after confirming hosted env vars are correct) ──
 router.get("/debug-env", authorize("admin"), (req, res) => {
-  const pass = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s/g, "");
   res.json({
-    GMAIL_USER:               process.env.GMAIL_USER        || "NOT SET",
-    GMAIL_APP_PASSWORD_LENGTH: pass.length,
-    GMAIL_APP_PASSWORD_VALID:  pass.length === 16,
-    EMAIL_FROM_NAME:          process.env.EMAIL_FROM_NAME   || "NOT SET",
-    EMAIL_FROM:               process.env.EMAIL_FROM        || "NOT SET",
-    CLIENT_URL:               process.env.CLIENT_URL        || "NOT SET",
-    NODE_ENV:                 process.env.NODE_ENV          || "NOT SET",
+    GMAIL_USER:          process.env.GMAIL_USER          || "MISSING ❌",
+    GMAIL_CLIENT_ID:     process.env.GMAIL_CLIENT_ID     ? "SET ✅" : "MISSING ❌",
+    GMAIL_CLIENT_SECRET: process.env.GMAIL_CLIENT_SECRET ? "SET ✅" : "MISSING ❌",
+    GMAIL_REFRESH_TOKEN: process.env.GMAIL_REFRESH_TOKEN ? "SET ✅" : "MISSING ❌",
+    GMAIL_APP_PASSWORD:  process.env.GMAIL_APP_PASSWORD  ? "SET ✅" : "MISSING ❌",
+    EMAIL_FROM_NAME:     process.env.EMAIL_FROM_NAME     || "MISSING ❌",
+    NODE_ENV:            process.env.NODE_ENV            || "MISSING ❌",
   });
 });
 
