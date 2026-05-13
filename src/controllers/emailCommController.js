@@ -3,13 +3,8 @@
 const User     = require("../models/User");
 const EmailLog = require("../models/EmailLog");
 
-/* ============================================================
-   BREVO TRANSACTIONAL EMAIL — raw fetch, no SDK
-   No SMTP ports, works on Render + local + any host
-   Free: 300 emails/day forever
-   ============================================================ */
 async function sendViaBrevo({ to, subject, html, text }) {
-  const apiKey   = process.env.BREVO_API_KEY;
+  const apiKey    = process.env.BREVO_API_KEY;
   const fromEmail = process.env.EMAIL_FROM      || "quibotechnologies@gmail.com";
   const fromName  = process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS";
 
@@ -44,10 +39,7 @@ async function sendViaBrevo({ to, subject, html, text }) {
     throw new Error(`Brevo non-JSON response (HTTP ${response.status}): ${raw.slice(0, 200)}`);
   }
 
-  console.log(`Brevo response [${response.status}]:`, JSON.stringify(data));
-
   if (!response.ok) {
-    // Brevo error shape: { code, message } or { message }
     throw new Error(data.message || data.code || `Brevo HTTP ${response.status}`);
   }
 
@@ -55,9 +47,6 @@ async function sendViaBrevo({ to, subject, html, text }) {
   return data;
 }
 
-/* ============================================================
-   HTML EMAIL TEMPLATE
-   ============================================================ */
 function buildTemplate({
   recipientName = "Team Member",
   senderName,
@@ -108,7 +97,6 @@ function buildTemplate({
 <tr><td align="center">
   <table class="container" role="presentation" width="600" cellpadding="0" cellspacing="0"
     style="max-width:600px;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10)">
-
     <tr><td style="background:linear-gradient(135deg,#334155,#475569);padding:20px 32px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
         <td style="vertical-align:middle">
@@ -122,13 +110,11 @@ function buildTemplate({
         </td>
       </tr></table>
     </td></tr>
-
     ${pri.show ? `<tr><td style="background:${pri.headerBg};padding:10px 32px">
       <p style="margin:0;font-size:12px;font-weight:800;color:#fff;text-transform:uppercase">
         ${pri.icon} ${pri.label} — Immediate Attention Required
       </p>
     </td></tr>` : ""}
-
     <tr><td style="background:linear-gradient(180deg,#475569,#f1f5f9);padding:28px 32px 0">
       <table role="presentation" cellpadding="0" cellspacing="0"><tr>
         <td style="vertical-align:middle;padding-right:14px">
@@ -145,7 +131,6 @@ function buildTemplate({
         </td>
       </tr></table>
     </td></tr>
-
     <tr><td class="body-pad" style="background:#fff;padding:32px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0">
       <p style="margin:0 0 6px;font-size:22px;font-weight:800;color:#0f172a">Hi ${recipientName} 👋</p>
       <p style="margin:0 0 24px;font-size:13px;color:#64748b">
@@ -171,21 +156,16 @@ function buildTemplate({
         </td>
       </tr></table>
     </td></tr>
-
     <tr><td style="background:#334155;padding:22px 32px;border-radius:0 0 16px 16px">
       <p style="margin:0 0 5px;font-size:13px;font-weight:700;color:#e2e8f0">Quibo Technologies Pvt. Ltd.</p>
       <p style="margin:0 0 4px;font-size:11px;color:rgba(148,163,184,.8)">© 2026 All rights reserved.</p>
       <p style="margin:0;font-size:10px;color:rgba(100,116,139,.8)">This is an internal HRMS communication. Please do not reply.</p>
     </td></tr>
-
   </table>
 </td></tr></table>
 </body></html>`;
 }
 
-/* ============================================================
-   GET DIRECTORY
-   ============================================================ */
 exports.getDirectory = async (req, res) => {
   try {
     const users = await User.find({ isActive: true })
@@ -198,9 +178,6 @@ exports.getDirectory = async (req, res) => {
   }
 };
 
-/* ============================================================
-   SEND DIRECT EMAIL
-   ============================================================ */
 exports.sendEmail = async (req, res) => {
   try {
     const { to, cc = [], subject, body, priority = "normal" } = req.body;
@@ -272,9 +249,6 @@ exports.sendEmail = async (req, res) => {
   }
 };
 
-/* ============================================================
-   SEND TEAM EMAIL
-   ============================================================ */
 exports.sendToTeam = async (req, res) => {
   try {
     const { roles, subject, body, priority = "normal" } = req.body;
@@ -337,8 +311,7 @@ exports.sendToTeam = async (req, res) => {
 };
 
 /* ============================================================
-   TEST BREVO — just validates API key, no email sent
-   So it works even before sender email is verified
+   TEST BREVO — always returns 200, never throws 500
    ============================================================ */
 exports.testSmtp = async (req, res) => {
   const apiKey = process.env.BREVO_API_KEY;
@@ -347,14 +320,13 @@ exports.testSmtp = async (req, res) => {
   console.log("  BREVO_API_KEY:", apiKey ? `SET ✅ (length=${apiKey.length})` : "MISSING ❌");
 
   if (!apiKey) {
-    return res.status(500).json({
+    return res.status(200).json({
       success: false,
       message: "BREVO_API_KEY not set in environment variables.",
     });
   }
 
   try {
-    // Just call the account info endpoint — no email sent, no sender needed
     const response = await fetch("https://api.brevo.com/v3/account", {
       method:  "GET",
       headers: {
@@ -363,14 +335,26 @@ exports.testSmtp = async (req, res) => {
       },
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (_) {
+      return res.status(200).json({
+        success: false,
+        message: `Brevo returned non-JSON (HTTP ${response.status})`,
+      });
+    }
+
     console.log("Brevo account check:", JSON.stringify(data));
 
     if (!response.ok) {
-      throw new Error(data.message || `Brevo HTTP ${response.status}`);
+      return res.status(200).json({
+        success: false,
+        message: data.message || `Brevo API error (HTTP ${response.status}) — API key may be disabled or invalid. Regenerate it at app.brevo.com`,
+      });
     }
 
-    res.json({
+    return res.status(200).json({
       success: true,
       message: `Brevo connected! Account: ${data.email || data.companyName || "verified"}`,
       plan:    data.plan?.[0]?.type || "free",
@@ -378,13 +362,13 @@ exports.testSmtp = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ testBrevo failed:", err.message);
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(200).json({
+      success: false,
+      message: err.message || "Could not reach Brevo API",
+    });
   }
 };
 
-/* ============================================================
-   GET LOGS
-   ============================================================ */
 exports.getLogs = async (req, res) => {
   try {
     const filter = req.user.role === "admin" ? {} : { sentBy: req.user._id };
