@@ -1,52 +1,58 @@
 "use strict";
 
-const nodemailer = require("nodemailer");
-const User       = require("../models/User");
-const EmailLog   = require("../models/EmailLog");
+const User     = require("../models/User");
+const EmailLog = require("../models/EmailLog");
 
 /* ============================================================
-   NODEMAILER TRANSPORTER — Gmail SSL port 465
-   Works locally AND on Render/any cloud host
+   BREVO TRANSACTIONAL EMAIL — raw fetch, no SDK
+   No SMTP ports, works on Render + local + any host
+   Free: 300 emails/day forever
    ============================================================ */
-function createTransporter() {
-  const user = process.env.EMAIL_USER;
-  const pass = process.env.EMAIL_PASS;
+async function sendViaBrevo({ to, subject, html, text }) {
+  const apiKey   = process.env.BREVO_API_KEY;
+  const fromEmail = process.env.EMAIL_FROM      || "quibotechnologies@gmail.com";
+  const fromName  = process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS";
 
-  if (!user || !pass) {
-    throw new Error(
-      "EMAIL_USER or EMAIL_PASS not set in environment variables."
-    );
+  if (!apiKey) throw new Error("BREVO_API_KEY not set in environment variables.");
+
+  console.log(`📧 Brevo → ${to} | Subject: ${subject}`);
+
+  const payload = {
+    sender:      { name: fromName, email: fromEmail },
+    to:          [{ email: to }],
+    subject,
+    htmlContent: html || `<p>${text}</p>`,
+    textContent: text || "",
+  };
+
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method:  "POST",
+    headers: {
+      "Accept":       "application/json",
+      "Content-Type": "application/json",
+      "api-key":      apiKey,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  let data;
+  if (contentType.includes("application/json")) {
+    data = await response.json();
+  } else {
+    const raw = await response.text();
+    throw new Error(`Brevo non-JSON response (HTTP ${response.status}): ${raw.slice(0, 200)}`);
   }
 
-  return nodemailer.createTransport({
-    host:   "smtp.gmail.com",
-    port:   465,
-    secure: true,
-    auth:   { user, pass },
-    tls:    { rejectUnauthorized: false },
-  });
-}
+  console.log(`Brevo response [${response.status}]:`, JSON.stringify(data));
 
-/* ============================================================
-   SEND EMAIL
-   ============================================================ */
-async function sendViaMail({ to, subject, html, text }) {
-  const transporter = createTransporter();
-  const fromName    = process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS";
-  const fromEmail   = process.env.EMAIL_USER;
+  if (!response.ok) {
+    // Brevo error shape: { code, message } or { message }
+    throw new Error(data.message || data.code || `Brevo HTTP ${response.status}`);
+  }
 
-  console.log(`📧 Sending via Gmail → ${to} | Subject: ${subject}`);
-
-  const info = await transporter.sendMail({
-    from:    `"${fromName}" <${fromEmail}>`,
-    to,
-    subject,
-    html:    html || undefined,
-    text:    text || undefined,
-  });
-
-  console.log(`✅ Email sent: ${info.messageId}`);
-  return { messageId: info.messageId, response: info.response };
+  console.log(`✅ Brevo sent to ${to} | messageId: ${data.messageId}`);
+  return data;
 }
 
 /* ============================================================
@@ -68,7 +74,9 @@ function buildTemplate({
   }[priority] || { icon: "🟢", label: "Normal Priority", headerBg: "#475569", show: false };
 
   const bodyHtml = String(body)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
     .replace(/\n/g, "<br/>");
 
   const initials = senderName
@@ -211,7 +219,7 @@ exports.sendEmail = async (req, res) => {
     for (const email of to) {
       const recipientName = nameMap[email] || email.split("@")[0];
       try {
-        await sendViaMail({
+        await sendViaBrevo({
           to:      email,
           subject: `[Quibo HRMS] ${subject}`,
           html:    buildTemplate({ recipientName, senderName, senderRole, subject, body, priority, isTeam: false }),
@@ -226,11 +234,11 @@ exports.sendEmail = async (req, res) => {
     const sentCount = to.length - errors.length;
 
     await EmailLog.create({
-      sentBy: req.user._id,
-      type:   "direct",
+      sentBy:   req.user._id,
+      type:     "direct",
       to, cc, subject, body, priority,
-      status: errors.length === to.length ? "failed" : "sent",
-      error:  errors.length ? JSON.stringify(errors) : undefined,
+      status:   errors.length === to.length ? "failed" : "sent",
+      error:    errors.length ? JSON.stringify(errors) : undefined,
     });
 
     if (errors.length === to.length) {
@@ -285,7 +293,7 @@ exports.sendToTeam = async (req, res) => {
     const errors = [];
     for (const user of recipients) {
       try {
-        await sendViaMail({
+        await sendViaBrevo({
           to:      user.email,
           subject: `[Quibo HRMS Broadcast] ${subject}`,
           html:    buildTemplate({ recipientName: user.name, senderName, senderRole, subject, body, priority, isTeam: true }),
@@ -300,13 +308,13 @@ exports.sendToTeam = async (req, res) => {
     const sentCount = recipients.length - errors.length;
 
     await EmailLog.create({
-      sentBy: req.user._id,
-      type:   "team",
+      sentBy:   req.user._id,
+      type:     "team",
       roles,
-      to:     recipients.map((u) => u.email),
+      to:       recipients.map((u) => u.email),
       subject, body, priority,
-      status: errors.length === recipients.length ? "failed" : "sent",
-      error:  errors.length ? JSON.stringify(errors) : undefined,
+      status:   errors.length === recipients.length ? "failed" : "sent",
+      error:    errors.length ? JSON.stringify(errors) : undefined,
     });
 
     if (errors.length === recipients.length) {
@@ -329,51 +337,48 @@ exports.sendToTeam = async (req, res) => {
 };
 
 /* ============================================================
-   TEST CONNECTION
+   TEST BREVO — just validates API key, no email sent
+   So it works even before sender email is verified
    ============================================================ */
 exports.testSmtp = async (req, res) => {
-  const user = process.env.EMAIL_USER;
-  const pass = process.env.EMAIL_PASS;
+  const apiKey = process.env.BREVO_API_KEY;
 
-  console.log("🧪 testSmtp called");
-  console.log("  EMAIL_USER:", user ? `SET ✅ (${user})` : "MISSING ❌");
-  console.log("  EMAIL_PASS:", pass ? `SET ✅ (length=${pass.length})` : "MISSING ❌");
+  console.log("🧪 testBrevo called");
+  console.log("  BREVO_API_KEY:", apiKey ? `SET ✅ (length=${apiKey.length})` : "MISSING ❌");
 
-  if (!user || !pass) {
+  if (!apiKey) {
     return res.status(500).json({
       success: false,
-      message: "EMAIL_USER or EMAIL_PASS not set in environment variables.",
+      message: "BREVO_API_KEY not set in environment variables.",
     });
   }
 
   try {
-    const transporter = createTransporter();
-
-    // Verify connection first
-    await transporter.verify();
-    console.log("✅ SMTP connection verified");
-
-    // Send test email
-    const info = await transporter.sendMail({
-      from:    `"${process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS"}" <${user}>`,
-      to:      user,   // send to self as test
-      subject: "[Test] Quibo HRMS Gmail OK ✅",
-      html:    "<h2>✅ Gmail connected!</h2><p>Quibo Tech HRMS email system is working correctly via Nodemailer.</p>",
-      text:    "Gmail connected and working correctly from Quibo Tech HRMS.",
+    // Just call the account info endpoint — no email sent, no sender needed
+    const response = await fetch("https://api.brevo.com/v3/account", {
+      method:  "GET",
+      headers: {
+        "Accept":  "application/json",
+        "api-key": apiKey,
+      },
     });
 
-    console.log("✅ Test email sent:", info.messageId);
+    const data = await response.json();
+    console.log("Brevo account check:", JSON.stringify(data));
+
+    if (!response.ok) {
+      throw new Error(data.message || `Brevo HTTP ${response.status}`);
+    }
+
     res.json({
-      success:   true,
-      message:   "Gmail connected! Test email sent successfully.",
-      messageId: info.messageId,
+      success: true,
+      message: `Brevo connected! Account: ${data.email || data.companyName || "verified"}`,
+      plan:    data.plan?.[0]?.type || "free",
+      email:   data.email,
     });
   } catch (err) {
-    console.error("❌ testSmtp failed:", err.message);
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
+    console.error("❌ testBrevo failed:", err.message);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
