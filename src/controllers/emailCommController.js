@@ -5,43 +5,46 @@ const User       = require("../models/User");
 const EmailLog   = require("../models/EmailLog");
 
 /* ============================================================
-   CREATE TRANSPORTER  (Gmail via App Password)
-   GMAIL_USER = quibotechnologies@gmail.com
-   GMAIL_APP_PASSWORD = 16-char app password from Google Account
+   NODEMAILER TRANSPORTER — Gmail SSL port 465
+   Works locally AND on Render/any cloud host
    ============================================================ */
 function createTransporter() {
-  const user = process.env.GMAIL_USER;
-  const pass = process.env.GMAIL_APP_PASSWORD;
+  const user = process.env.EMAIL_USER;
+  const pass = process.env.EMAIL_PASS;
 
   if (!user || !pass) {
     throw new Error(
-      "GMAIL_USER or GMAIL_APP_PASSWORD environment variable is not set. " +
-      "Go to Google Account → Security → App Passwords and generate one."
+      "EMAIL_USER or EMAIL_PASS not set in environment variables."
     );
   }
 
   return nodemailer.createTransport({
-    service: "gmail",
-    auth: { user, pass },
+    host:   "smtp.gmail.com",
+    port:   465,
+    secure: true,
+    auth:   { user, pass },
+    tls:    { rejectUnauthorized: false },
   });
 }
 
 /* ============================================================
-   SEND EMAIL VIA NODEMAILER
+   SEND EMAIL
    ============================================================ */
-async function sendViaMail({ from, fromName, to, subject, html, text }) {
+async function sendViaMail({ to, subject, html, text }) {
   const transporter = createTransporter();
+  const fromName    = process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS";
+  const fromEmail   = process.env.EMAIL_USER;
 
-  const mailOptions = {
-    from:    `"${fromName || process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS"}" <${from}>`,
+  console.log(`📧 Sending via Gmail → ${to} | Subject: ${subject}`);
+
+  const info = await transporter.sendMail({
+    from:    `"${fromName}" <${fromEmail}>`,
     to,
     subject,
-    html:    html  || `<p>${text}</p>`,
-    text:    text  || "",
-  };
+    html:    html || undefined,
+    text:    text || undefined,
+  });
 
-  console.log(`📧 Sending → ${to} | Subject: ${subject}`);
-  const info = await transporter.sendMail(mailOptions);
   console.log(`✅ Email sent: ${info.messageId}`);
   return { messageId: info.messageId, response: info.response };
 }
@@ -98,7 +101,6 @@ function buildTemplate({
   <table class="container" role="presentation" width="600" cellpadding="0" cellspacing="0"
     style="max-width:600px;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10)">
 
-    <!-- Brand bar -->
     <tr><td style="background:linear-gradient(135deg,#334155,#475569);padding:20px 32px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
         <td style="vertical-align:middle">
@@ -119,7 +121,6 @@ function buildTemplate({
       </p>
     </td></tr>` : ""}
 
-    <!-- Sender hero -->
     <tr><td style="background:linear-gradient(180deg,#475569,#f1f5f9);padding:28px 32px 0">
       <table role="presentation" cellpadding="0" cellspacing="0"><tr>
         <td style="vertical-align:middle;padding-right:14px">
@@ -137,28 +138,22 @@ function buildTemplate({
       </tr></table>
     </td></tr>
 
-    <!-- Body -->
     <tr><td class="body-pad" style="background:#fff;padding:32px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0">
       <p style="margin:0 0 6px;font-size:22px;font-weight:800;color:#0f172a">Hi ${recipientName} 👋</p>
       <p style="margin:0 0 24px;font-size:13px;color:#64748b">
         You have a new ${isTeam ? "broadcast" : "message"} from your team.
       </p>
-
       <div style="background:linear-gradient(135deg,#f1f5f9,#e2e8f0);border:1px solid #cbd5e1;border-radius:12px;padding:14px 18px;margin-bottom:20px">
         <p style="margin:0 0 5px;font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:1.5px">Subject</p>
         <p style="margin:0;font-size:16px;font-weight:700;color:#1e293b">${subject}</p>
       </div>
-
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #475569;border-radius:0 12px 12px 0;padding:20px 20px 20px 18px;margin-bottom:24px">
         <p style="margin:0 0 8px;font-size:9px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:1.5px">Message</p>
         <p style="margin:0;font-size:14px;color:#334155;line-height:1.85">${bodyHtml}</p>
       </div>
-
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
         <td style="vertical-align:middle">
-          <p style="margin:0 0 3px;font-size:12px;color:#94a3b8">
-            Sent via <strong style="color:#475569">Quibo Tech HRMS</strong>
-          </p>
+          <p style="margin:0 0 3px;font-size:12px;color:#94a3b8">Sent via <strong style="color:#475569">Quibo Tech HRMS</strong></p>
           <p style="margin:0;font-size:11px;color:#cbd5e1">🕐 ${now} IST</p>
         </td>
         <td class="hide-mobile" align="right" style="vertical-align:middle">
@@ -169,13 +164,10 @@ function buildTemplate({
       </tr></table>
     </td></tr>
 
-    <!-- Footer -->
     <tr><td style="background:#334155;padding:22px 32px;border-radius:0 0 16px 16px">
       <p style="margin:0 0 5px;font-size:13px;font-weight:700;color:#e2e8f0">Quibo Technologies Pvt. Ltd.</p>
       <p style="margin:0 0 4px;font-size:11px;color:rgba(148,163,184,.8)">© 2026 All rights reserved.</p>
-      <p style="margin:0;font-size:10px;color:rgba(100,116,139,.8)">
-        This is an internal HRMS communication. Please do not reply.
-      </p>
+      <p style="margin:0;font-size:10px;color:rgba(100,116,139,.8)">This is an internal HRMS communication. Please do not reply.</p>
     </td></tr>
 
   </table>
@@ -211,7 +203,6 @@ exports.sendEmail = async (req, res) => {
 
     const senderName = req.user?.name || "HRMS Admin";
     const senderRole = req.user?.role || "admin";
-    const fromEmail  = process.env.GMAIL_USER || "quibotechnologies@gmail.com";
 
     const recipientDocs = await User.find({ email: { $in: to } }).select("name email");
     const nameMap = Object.fromEntries(recipientDocs.map((u) => [u.email, u.name]));
@@ -221,12 +212,10 @@ exports.sendEmail = async (req, res) => {
       const recipientName = nameMap[email] || email.split("@")[0];
       try {
         await sendViaMail({
-          from:     fromEmail,
-          fromName: process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS",
-          to:       email,
-          subject:  `[Quibo HRMS] ${subject}`,
-          html:     buildTemplate({ recipientName, senderName, senderRole, subject, body, priority, isTeam: false }),
-          text:     `Hi ${recipientName},\n\n${body}\n\n— ${senderName} (${senderRole})\nQuibo Tech HRMS`,
+          to:      email,
+          subject: `[Quibo HRMS] ${subject}`,
+          html:    buildTemplate({ recipientName, senderName, senderRole, subject, body, priority, isTeam: false }),
+          text:    `Hi ${recipientName},\n\n${body}\n\n— ${senderName} (${senderRole})\nQuibo Tech HRMS`,
         });
       } catch (e) {
         console.error(`❌ Failed to send to ${email}:`, e.message);
@@ -237,11 +226,11 @@ exports.sendEmail = async (req, res) => {
     const sentCount = to.length - errors.length;
 
     await EmailLog.create({
-      sentBy:   req.user._id,
-      type:     "direct",
+      sentBy: req.user._id,
+      type:   "direct",
       to, cc, subject, body, priority,
-      status:   errors.length === to.length ? "failed" : "sent",
-      error:    errors.length ? JSON.stringify(errors) : undefined,
+      status: errors.length === to.length ? "failed" : "sent",
+      error:  errors.length ? JSON.stringify(errors) : undefined,
     });
 
     if (errors.length === to.length) {
@@ -263,9 +252,9 @@ exports.sendEmail = async (req, res) => {
       await EmailLog.create({
         sentBy:   req.user._id,
         type:     "direct",
-        to:       req.body.to      || [],
-        subject:  req.body.subject || "",
-        body:     req.body.body    || "",
+        to:       req.body.to       || [],
+        subject:  req.body.subject  || "",
+        body:     req.body.body     || "",
         priority: req.body.priority || "normal",
         status:   "failed",
         error:    err.message,
@@ -292,18 +281,15 @@ exports.sendToTeam = async (req, res) => {
 
     const senderName = req.user?.name || "HRMS Admin";
     const senderRole = req.user?.role || "admin";
-    const fromEmail  = process.env.GMAIL_USER || "quibotechnologies@gmail.com";
 
     const errors = [];
     for (const user of recipients) {
       try {
         await sendViaMail({
-          from:     fromEmail,
-          fromName: process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS",
-          to:       user.email,
-          subject:  `[Quibo HRMS Broadcast] ${subject}`,
-          html:     buildTemplate({ recipientName: user.name, senderName, senderRole, subject, body, priority, isTeam: true }),
-          text:     `Hi ${user.name},\n\n${body}\n\n— ${senderName} (${senderRole})\nQuibo Tech HRMS`,
+          to:      user.email,
+          subject: `[Quibo HRMS Broadcast] ${subject}`,
+          html:    buildTemplate({ recipientName: user.name, senderName, senderRole, subject, body, priority, isTeam: true }),
+          text:    `Hi ${user.name},\n\n${body}\n\n— ${senderName} (${senderRole})\nQuibo Tech HRMS`,
         });
       } catch (e) {
         console.error(`❌ Failed to send to ${user.email}:`, e.message);
@@ -314,13 +300,13 @@ exports.sendToTeam = async (req, res) => {
     const sentCount = recipients.length - errors.length;
 
     await EmailLog.create({
-      sentBy:  req.user._id,
-      type:    "team",
+      sentBy: req.user._id,
+      type:   "team",
       roles,
-      to:      recipients.map((u) => u.email),
+      to:     recipients.map((u) => u.email),
       subject, body, priority,
-      status:  errors.length === recipients.length ? "failed" : "sent",
-      error:   errors.length ? JSON.stringify(errors) : undefined,
+      status: errors.length === recipients.length ? "failed" : "sent",
+      error:  errors.length ? JSON.stringify(errors) : undefined,
     });
 
     if (errors.length === recipients.length) {
@@ -343,62 +329,51 @@ exports.sendToTeam = async (req, res) => {
 };
 
 /* ============================================================
-   TEST SMTP CONNECTION
+   TEST CONNECTION
    ============================================================ */
 exports.testSmtp = async (req, res) => {
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  const user = process.env.EMAIL_USER;
+  const pass = process.env.EMAIL_PASS;
 
   console.log("🧪 testSmtp called");
-  console.log("  GMAIL_USER:         ", gmailUser || "MISSING ❌");
-  console.log("  GMAIL_APP_PASSWORD: ", gmailPass ? `SET ✅ (length=${gmailPass.length})` : "MISSING ❌");
-  console.log("  Node version:       ", process.version);
+  console.log("  EMAIL_USER:", user ? `SET ✅ (${user})` : "MISSING ❌");
+  console.log("  EMAIL_PASS:", pass ? `SET ✅ (length=${pass.length})` : "MISSING ❌");
 
-  if (!gmailUser || !gmailPass) {
+  if (!user || !pass) {
     return res.status(500).json({
       success: false,
-      message: !gmailUser
-        ? "GMAIL_USER not set in environment variables"
-        : "GMAIL_APP_PASSWORD not set. Generate one at: Google Account → Security → 2-Step Verification → App Passwords",
+      message: "EMAIL_USER or EMAIL_PASS not set in environment variables.",
     });
   }
 
   try {
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: { user: gmailUser, pass: gmailPass },
-    });
+    const transporter = createTransporter();
 
     // Verify connection first
     await transporter.verify();
-    console.log("✅ Gmail SMTP verified");
+    console.log("✅ SMTP connection verified");
 
-    // Send actual test email to self
+    // Send test email
     const info = await transporter.sendMail({
-      from:    `"Quibo Tech HRMS" <${gmailUser}>`,
-      to:      gmailUser,
-      subject: "[Test] Gmail SMTP Connection OK ✅",
-      html:    "<h2>✅ Gmail is connected!</h2><p>Your Quibo Tech HRMS email system is working correctly.</p>",
-      text:    "Gmail SMTP is connected and working correctly from Quibo Tech HRMS.",
+      from:    `"${process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS"}" <${user}>`,
+      to:      user,   // send to self as test
+      subject: "[Test] Quibo HRMS Gmail OK ✅",
+      html:    "<h2>✅ Gmail connected!</h2><p>Quibo Tech HRMS email system is working correctly via Nodemailer.</p>",
+      text:    "Gmail connected and working correctly from Quibo Tech HRMS.",
     });
 
-    console.log("✅ testSmtp success:", info.messageId);
+    console.log("✅ Test email sent:", info.messageId);
     res.json({
       success:   true,
-      message:   "Gmail SMTP connected and test email sent successfully! Check your inbox.",
+      message:   "Gmail connected! Test email sent successfully.",
       messageId: info.messageId,
     });
   } catch (err) {
     console.error("❌ testSmtp failed:", err.message);
-
-    let hint = err.message;
-    if (err.message.includes("Invalid login") || err.message.includes("Username and Password")) {
-      hint = "Invalid Gmail credentials. Make sure GMAIL_APP_PASSWORD is a 16-character App Password (not your regular Gmail password). Generate at: Google Account → Security → App Passwords";
-    } else if (err.message.includes("Less secure")) {
-      hint = "Enable 2-Step Verification on your Google account, then create an App Password.";
-    }
-
-    res.status(500).json({ success: false, message: hint });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
