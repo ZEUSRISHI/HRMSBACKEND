@@ -1,3 +1,4 @@
+// controllers/projectController.js
 const Project = require("../models/Project");
 const User    = require("../models/User");
 
@@ -6,10 +7,12 @@ const User    = require("../models/User");
 ════════════════════════════════════════════════════════════ */
 const populateProject = (query) =>
   query
-    .populate("managerId",                   "name email role")
-    .populate("teamMembers",                 "name email role")
-    .populate("documents.uploadedBy",        "name email role")
-    .populate("workSubmissions.submittedBy", "name email role");
+    .populate("managerId",                        "name email role")
+    .populate("teamMembers",                      "name email role department designation")
+    .populate("documents.uploadedBy",             "name email role")
+    .populate("workSubmissions.submittedBy",       "name email role")
+    .populate("dailyStatuses.submittedBy",         "name email role")
+    .populate("dailyStatuses.commentedBy",         "name email role");
 
 /* ════════════════════════════════════════════════════════════
    CREATE  (Admin only)
@@ -17,13 +20,13 @@ const populateProject = (query) =>
 const createProject = async (req, res) => {
   try {
     const {
-      name, description, clientName, deadline,
-      status, budget, managerId, teamMembers, createdAt,
+      name, description, clientName, deadline, priority,
+      status, budget, managerId, teamMembers, createdAt, tags,
     } = req.body;
 
     if (!name?.trim())
       return res.status(400).json({ success: false, message: "Project name is required." });
-    if (!budget && budget !== 0)
+    if (budget === undefined || budget === null || budget === "")
       return res.status(400).json({ success: false, message: "Budget is required." });
 
     const project = new Project({
@@ -31,12 +34,12 @@ const createProject = async (req, res) => {
       description: description || "",
       clientName:  clientName  || "",
       deadline:    deadline    || "",
+      priority:    priority    || "medium",
       status:      status      || "planning",
       budget:      Number(budget) || 0,
-      spent:       0,
-      progress:    0,
       managerId:   managerId   || null,
       teamMembers: Array.isArray(teamMembers) ? teamMembers : [],
+      tags:        Array.isArray(tags)        ? tags        : [],
     });
 
     if (createdAt) {
@@ -59,9 +62,9 @@ const createProject = async (req, res) => {
 const createManualProject = async (req, res) => {
   try {
     const {
-      name, description, clientName, deadline,
+      name, description, clientName, deadline, priority,
       status, budget, spent, progress,
-      managerId, teamMembers, createdAt,
+      managerId, teamMembers, createdAt, tags, milestones,
     } = req.body;
 
     if (!name?.trim())
@@ -72,12 +75,15 @@ const createManualProject = async (req, res) => {
       description: description || "",
       clientName:  clientName  || "",
       deadline:    deadline    || "",
+      priority:    priority    || "medium",
       status:      status      || "completed",
       budget:      Number(budget)   || 0,
       spent:       Number(spent)    || 0,
       progress:    Number(progress) || 0,
       managerId:   managerId   || null,
       teamMembers: Array.isArray(teamMembers) ? teamMembers : [],
+      tags:        Array.isArray(tags)        ? tags        : [],
+      milestones:  Array.isArray(milestones)  ? milestones  : [],
     });
 
     if (createdAt) {
@@ -99,9 +105,7 @@ const createManualProject = async (req, res) => {
 ════════════════════════════════════════════════════════════ */
 const getAllProjects = async (req, res) => {
   try {
-    const projects = await populateProject(
-      Project.find().sort({ createdAt: -1 })
-    );
+    const projects = await populateProject(Project.find().sort({ createdAt: -1 }));
     res.status(200).json({ success: true, projects });
   } catch (err) {
     console.error("getAllProjects:", err.message);
@@ -110,20 +114,35 @@ const getAllProjects = async (req, res) => {
 };
 
 /* ════════════════════════════════════════════════════════════
-   GET MY  (Employee sees only assigned projects)
-   Also used as fallback for any authenticated user.
+   GET MY  (Employee sees only assigned projects; docs stripped)
 ════════════════════════════════════════════════════════════ */
 const getMyProjects = async (req, res) => {
   try {
+    const role = req.user.role;
+    const uid  = req.user._id;
+
+    if (role === "admin" || role === "manager" || role === "hr") {
+      const projects = await populateProject(Project.find().sort({ createdAt: -1 }));
+      return res.status(200).json({ success: true, projects });
+    }
+
     const projects = await populateProject(
-      Project.find({
-        $or: [
-          { managerId:   req.user._id },
-          { teamMembers: req.user._id },
-        ],
-      }).sort({ createdAt: -1 })
+      Project.find({ $or: [{ managerId: uid }, { teamMembers: uid }] }).sort({ createdAt: -1 })
     );
-    res.status(200).json({ success: true, projects });
+
+    const sanitised = projects.map((p) => {
+      const obj        = p.toObject();
+      obj.documents    = [];  // employees cannot see documents
+      obj.dailyStatuses = obj.dailyStatuses.filter(
+        (d) => d.submittedBy?._id?.toString() === uid.toString()
+      );
+      obj.workSubmissions = obj.workSubmissions.filter(
+        (s) => s.submittedBy?._id?.toString() === uid.toString()
+      );
+      return obj;
+    });
+
+    res.status(200).json({ success: true, projects: sanitised });
   } catch (err) {
     console.error("getMyProjects:", err.message);
     res.status(500).json({ success: false, message: err.message });
@@ -131,7 +150,44 @@ const getMyProjects = async (req, res) => {
 };
 
 /* ════════════════════════════════════════════════════════════
-   UPDATE  (Admin — full; Manager — progress + spent only)
+   GET BY ID
+════════════════════════════════════════════════════════════ */
+const getProjectById = async (req, res) => {
+  try {
+    const project = await populateProject(Project.findById(req.params.id));
+    if (!project)
+      return res.status(404).json({ success: false, message: "Project not found." });
+
+    const uid  = req.user._id.toString();
+    const role = req.user.role;
+
+    if (role === "admin" || role === "manager" || role === "hr")
+      return res.status(200).json({ success: true, project });
+
+    const isMember  = project.teamMembers.some((m) => m._id.toString() === uid);
+    const isMgr     = project.managerId?._id?.toString() === uid;
+
+    if (!isMember && !isMgr)
+      return res.status(403).json({ success: false, message: "Access denied." });
+
+    const obj         = project.toObject();
+    obj.documents     = [];
+    obj.dailyStatuses = obj.dailyStatuses.filter(
+      (d) => d.submittedBy?._id?.toString() === uid
+    );
+    obj.workSubmissions = obj.workSubmissions.filter(
+      (s) => s.submittedBy?._id?.toString() === uid
+    );
+
+    res.status(200).json({ success: true, project: obj });
+  } catch (err) {
+    console.error("getProjectById:", err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ════════════════════════════════════════════════════════════
+   UPDATE  (Admin — full | Manager — progress + spent + milestones)
 ════════════════════════════════════════════════════════════ */
 const updateProject = async (req, res) => {
   try {
@@ -141,38 +197,31 @@ const updateProject = async (req, res) => {
 
     const role = req.user.role;
 
-    /* Managers may only patch progress and spent */
     if (role === "manager") {
       const allowed = {};
-      if (req.body.progress !== undefined) allowed.progress = Number(req.body.progress);
-      if (req.body.spent    !== undefined) allowed.spent    = Number(req.body.spent);
-
+      if (req.body.progress   !== undefined) allowed.progress   = Number(req.body.progress);
+      if (req.body.spent      !== undefined) allowed.spent      = Number(req.body.spent);
+      if (req.body.milestones !== undefined) allowed.milestones = req.body.milestones;
       if (!Object.keys(allowed).length)
-        return res.status(403).json({ success: false, message: "Managers can only update progress and spent." });
-
+        return res.status(403).json({ success: false, message: "Managers can only update progress, spent, and milestones." });
       Object.assign(project, allowed);
-      await project.save();
     } else {
-      /* Admin — full update */
-      const {
-        name, description, clientName, deadline,
-        status, budget, spent, progress, managerId, teamMembers,
-      } = req.body;
-
-      if (name        !== undefined) project.name        = name.trim();
-      if (description !== undefined) project.description = description;
-      if (clientName  !== undefined) project.clientName  = clientName;
-      if (deadline    !== undefined) project.deadline    = deadline;
-      if (status      !== undefined) project.status      = status;
-      if (budget      !== undefined) project.budget      = Number(budget);
-      if (spent       !== undefined) project.spent       = Number(spent);
-      if (progress    !== undefined) project.progress    = Number(progress);
-      if (managerId   !== undefined) project.managerId   = managerId || null;
-      if (teamMembers !== undefined) project.teamMembers = Array.isArray(teamMembers) ? teamMembers : [];
-
-      await project.save();
+      const fields = [
+        "name","description","clientName","deadline","priority",
+        "status","budget","spent","progress","managerId","teamMembers","tags","milestones",
+      ];
+      fields.forEach((k) => {
+        if (req.body[k] !== undefined) {
+          if (k === "name") project[k] = req.body[k].trim();
+          else if (k === "budget" || k === "spent" || k === "progress")
+            project[k] = Number(req.body[k]);
+          else if (k === "managerId") project[k] = req.body[k] || null;
+          else project[k] = req.body[k];
+        }
+      });
     }
 
+    await project.save();
     const populated = await populateProject(Project.findById(project._id));
     res.status(200).json({ success: true, project: populated });
   } catch (err) {
@@ -197,14 +246,38 @@ const deleteProject = async (req, res) => {
 };
 
 /* ════════════════════════════════════════════════════════════
-   UPLOAD DOCUMENT  (Admin / Manager / HR)
+   UPLOAD DOCUMENT  (Admin / Manager / HR only)
+   Base64 data-URL stored directly in MongoDB
 ════════════════════════════════════════════════════════════ */
+const ALLOWED_FILE_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "image/png","image/jpeg","image/jpg","image/gif","image/webp",
+  "text/plain","application/zip",
+];
+const MAX_DOC_SIZE = 10 * 1024 * 1024;
+
 const uploadDocument = async (req, res) => {
   try {
-    const { name, url, fileType, size } = req.body;
+    const { name, url, fileType, size, category } = req.body;
 
-    if (!name?.trim() || !url?.trim())
-      return res.status(400).json({ success: false, message: "Document name and URL are required." });
+    if (!name?.trim())
+      return res.status(400).json({ success: false, message: "Document name is required." });
+    if (!url?.trim())
+      return res.status(400).json({ success: false, message: "Document data is required." });
+    if (fileType && !ALLOWED_FILE_TYPES.includes(fileType))
+      return res.status(400).json({ success: false, message: `File type "${fileType}" is not allowed.` });
+
+    const docSize    = Number(size) || 0;
+    const base64Data = url.includes(",") ? url.split(",")[1] : url;
+    const estimated  = Math.ceil((base64Data.length * 3) / 4);
+    if (docSize > MAX_DOC_SIZE || estimated > MAX_DOC_SIZE)
+      return res.status(400).json({ success: false, message: "File size exceeds the 10 MB limit." });
 
     const project = await Project.findById(req.params.id);
     if (!project)
@@ -214,7 +287,8 @@ const uploadDocument = async (req, res) => {
       name:       name.trim(),
       url:        url.trim(),
       fileType:   fileType || "application/octet-stream",
-      size:       Number(size) || 0,
+      size:       docSize,
+      category:   category || "other",
       uploadedBy: req.user._id,
     });
 
@@ -240,7 +314,6 @@ const deleteDocument = async (req, res) => {
     project.documents = project.documents.filter(
       (d) => d._id.toString() !== req.params.docId
     );
-
     if (project.documents.length === before)
       return res.status(404).json({ success: false, message: "Document not found." });
 
@@ -254,16 +327,125 @@ const deleteDocument = async (req, res) => {
 };
 
 /* ════════════════════════════════════════════════════════════
-   SUBMIT WORK
-   Allowed: Manager, HR, Employee (anyone assigned to the project
-            OR any privileged role).
-   Admin is intentionally excluded from submitting — they oversee.
-   Override this if your business rules differ.
+   SUBMIT DAILY STATUS
+   Who can submit: Manager, HR, Employee (assigned)
+   Who can view all: Admin, Manager of the project
+   Employee sees only own entries
+════════════════════════════════════════════════════════════ */
+const submitDailyStatus = async (req, res) => {
+  try {
+    const { summary, hoursWorked, blockers, nextPlan, mood } = req.body;
+
+    if (!summary?.trim())
+      return res.status(400).json({ success: false, message: "Summary is required." });
+
+    const project = await Project.findById(req.params.id);
+    if (!project)
+      return res.status(404).json({ success: false, message: "Project not found." });
+
+    const uid  = req.user._id.toString();
+    const role = req.user.role;
+
+    if (role === "admin")
+      return res.status(403).json({ success: false, message: "Admins do not submit daily status." });
+
+    const isMember  = project.teamMembers.some((m) => m.toString() === uid);
+    const isMgr     = project.managerId?.toString() === uid;
+
+    if (role === "employee" && !isMember)
+      return res.status(403).json({ success: false, message: "You are not assigned to this project." });
+
+    if (role === "manager" && !isMgr && !isMember)
+      return res.status(403).json({ success: false, message: "You are not the manager of this project." });
+
+    project.dailyStatuses.push({
+      submittedBy: req.user._id,
+      summary:     summary.trim(),
+      hoursWorked: Math.max(0, Number(hoursWorked) || 0),
+      blockers:    blockers    || "",
+      nextPlan:    nextPlan    || "",
+      mood:        mood        || "good",
+    });
+
+    await project.save();
+    const populated = await populateProject(Project.findById(project._id));
+    res.status(200).json({ success: true, project: populated });
+  } catch (err) {
+    console.error("submitDailyStatus:", err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ════════════════════════════════════════════════════════════
+   ADD COMMENT TO DAILY STATUS  (Admin / Manager)
+════════════════════════════════════════════════════════════ */
+const commentDailyStatus = async (req, res) => {
+  try {
+    const { comment } = req.body;
+    if (!comment?.trim())
+      return res.status(400).json({ success: false, message: "Comment is required." });
+
+    const project = await Project.findById(req.params.id);
+    if (!project)
+      return res.status(404).json({ success: false, message: "Project not found." });
+
+    const status = project.dailyStatuses.id(req.params.statusId);
+    if (!status)
+      return res.status(404).json({ success: false, message: "Daily status not found." });
+
+    status.managerComment = comment.trim();
+    status.commentedBy    = req.user._id;
+    status.commentedAt    = new Date();
+
+    await project.save();
+    const populated = await populateProject(Project.findById(project._id));
+    res.status(200).json({ success: true, project: populated });
+  } catch (err) {
+    console.error("commentDailyStatus:", err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ════════════════════════════════════════════════════════════
+   DELETE DAILY STATUS  (Admin / Manager / own entry)
+════════════════════════════════════════════════════════════ */
+const deleteDailyStatus = async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project)
+      return res.status(404).json({ success: false, message: "Project not found." });
+
+    const uid  = req.user._id.toString();
+    const role = req.user.role;
+
+    const entry = project.dailyStatuses.id(req.params.statusId);
+    if (!entry)
+      return res.status(404).json({ success: false, message: "Daily status not found." });
+
+    // Only admin, manager, or the owner can delete
+    const isOwner = entry.submittedBy?.toString() === uid;
+    if (role !== "admin" && role !== "manager" && !isOwner)
+      return res.status(403).json({ success: false, message: "Not authorised to delete this entry." });
+
+    project.dailyStatuses = project.dailyStatuses.filter(
+      (d) => d._id.toString() !== req.params.statusId
+    );
+
+    await project.save();
+    const populated = await populateProject(Project.findById(project._id));
+    res.status(200).json({ success: true, project: populated });
+  } catch (err) {
+    console.error("deleteDailyStatus:", err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ════════════════════════════════════════════════════════════
+   SUBMIT WORK  (legacy — kept for backwards compatibility)
 ════════════════════════════════════════════════════════════ */
 const submitWork = async (req, res) => {
   try {
     const { description, hoursWorked } = req.body;
-
     if (!description?.trim())
       return res.status(400).json({ success: false, message: "Description is required." });
 
@@ -271,20 +453,19 @@ const submitWork = async (req, res) => {
     if (!project)
       return res.status(404).json({ success: false, message: "Project not found." });
 
-    const uid    = req.user._id.toString();
-    const role   = req.user.role;
+    const uid  = req.user._id.toString();
+    const role = req.user.role;
 
-    const isTeamMember = project.teamMembers.some((m) => m.toString() === uid);
-    const isManager    = project.managerId?.toString() === uid;
-    const isHR         = role === "hr";
-    /* Employees must be assigned; HR and Managers can submit freely */
-    const canSubmit    = isTeamMember || isManager || isHR;
+    if (role === "admin")
+      return res.status(403).json({ success: false, message: "Admins do not submit work." });
 
-    if (!canSubmit)
-      return res.status(403).json({
-        success: false,
-        message: "You are not a member of this project and cannot submit work.",
-      });
+    const isMember  = project.teamMembers.some((m) => m.toString() === uid);
+    const isMgr     = project.managerId?.toString() === uid;
+
+    if (role === "employee" && !isMember)
+      return res.status(403).json({ success: false, message: "You are not assigned to this project." });
+    if (role === "manager" && !isMgr && !isMember)
+      return res.status(403).json({ success: false, message: "You are not the manager of this project." });
 
     project.workSubmissions.push({
       submittedBy: req.user._id,
@@ -302,7 +483,7 @@ const submitWork = async (req, res) => {
 };
 
 /* ════════════════════════════════════════════════════════════
-   DELETE SUBMISSION  (Admin / Manager)
+   DELETE WORK SUBMISSION  (Admin / Manager)
 ════════════════════════════════════════════════════════════ */
 const deleteSubmission = async (req, res) => {
   try {
@@ -314,7 +495,6 @@ const deleteSubmission = async (req, res) => {
     project.workSubmissions = project.workSubmissions.filter(
       (s) => s._id.toString() !== req.params.subId
     );
-
     if (project.workSubmissions.length === before)
       return res.status(404).json({ success: false, message: "Submission not found." });
 
@@ -330,22 +510,18 @@ const deleteSubmission = async (req, res) => {
 /* ════════════════════════════════════════════════════════════
    USER HELPERS
 ════════════════════════════════════════════════════════════ */
-
-/* All active users — for team member picker (Admin / Manager / HR) */
 const getAllUsers = async (req, res) => {
   try {
     const users = await User.find(
       { isActive: { $ne: false } },
-      "name email role"
+      "name email role department designation"
     ).sort({ name: 1 });
     res.status(200).json({ success: true, users });
   } catch (err) {
-    console.error("getAllUsers:", err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-/* Managers only — for manager dropdown (Admin) */
 const getManagers = async (req, res) => {
   try {
     const managers = await User.find(
@@ -354,12 +530,10 @@ const getManagers = async (req, res) => {
     ).sort({ name: 1 });
     res.status(200).json({ success: true, users: managers });
   } catch (err) {
-    console.error("getManagers:", err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-/* HR + Employee — for member picker */
 const getMembers = async (req, res) => {
   try {
     const members = await User.find(
@@ -368,7 +542,6 @@ const getMembers = async (req, res) => {
     ).sort({ name: 1 });
     res.status(200).json({ success: true, users: members });
   } catch (err) {
-    console.error("getMembers:", err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -378,10 +551,14 @@ module.exports = {
   createManualProject,
   getAllProjects,
   getMyProjects,
+  getProjectById,
   updateProject,
   deleteProject,
   uploadDocument,
   deleteDocument,
+  submitDailyStatus,
+  commentDailyStatus,
+  deleteDailyStatus,
   submitWork,
   deleteSubmission,
   getAllUsers,
