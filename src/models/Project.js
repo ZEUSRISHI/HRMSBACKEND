@@ -1,47 +1,105 @@
+// models/Project.js
 const mongoose = require("mongoose");
 
+/* ────────────────────────────────────────────────────────────
+   DOCUMENT  (contracts, specs, deliverables — Admin/HR/Manager)
+──────────────────────────────────────────────────────────── */
 const documentSchema = new mongoose.Schema({
-  name:       { type: String, required: true },
-  url:        { type: String, required: true },
-  fileType:   { type: String },
-  size:       { type: Number },
+  name:       { type: String, required: true, trim: true },
+  url:        { type: String, required: true },   // base64 data-URL stored in MongoDB
+  fileType:   { type: String, default: "application/octet-stream" },
+  size:       { type: Number, default: 0 },       // bytes
+  category: {
+    type:    String,
+    enum:    ["contract", "specification", "design", "report", "invoice", "other"],
+    default: "other",
+  },
   uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   uploadedAt: { type: Date, default: Date.now },
 });
 
+/* ────────────────────────────────────────────────────────────
+   DAILY STATUS  (submitted by team members — Employee/HR/Manager)
+   Visible: submitter + Admin + Manager of the project
+──────────────────────────────────────────────────────────── */
+const dailyStatusSchema = new mongoose.Schema({
+  submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  date:        { type: Date, default: Date.now },
+  summary:     { type: String, required: true, trim: true },   // what was done today
+  hoursWorked: { type: Number, default: 0, min: 0, max: 24 },
+  blockers:    { type: String, default: "" },                  // impediments / blockers
+  nextPlan:    { type: String, default: "" },                  // plan for tomorrow
+  mood: {
+    type:    String,
+    enum:    ["great", "good", "neutral", "struggling"],
+    default: "good",
+  },
+  managerComment: { type: String, default: "" },               // Admin/Manager reply
+  commentedBy:    { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  commentedAt:    { type: Date, default: null },
+});
+
+/* ────────────────────────────────────────────────────────────
+   WORK SUBMISSION  (hours + description — legacy / kept for compatibility)
+──────────────────────────────────────────────────────────── */
 const workSubmissionSchema = new mongoose.Schema({
   submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  description: { type: String, required: true },
-  hoursWorked: { type: Number, default: 0 },
+  description: { type: String, required: true, trim: true },
+  hoursWorked: { type: Number, default: 0, min: 0 },
   date:        { type: Date, default: Date.now },
 });
 
+/* ────────────────────────────────────────────────────────────
+   MILESTONE
+──────────────────────────────────────────────────────────── */
+const milestoneSchema = new mongoose.Schema({
+  title:       { type: String, required: true, trim: true },
+  dueDate:     { type: String, default: "" },
+  completed:   { type: Boolean, default: false },
+  completedAt: { type: Date, default: null },
+});
+
+/* ────────────────────────────────────────────────────────────
+   PROJECT  (root document)
+──────────────────────────────────────────────────────────── */
 const projectSchema = new mongoose.Schema(
   {
     name:        { type: String, required: true, trim: true },
     description: { type: String, default: "" },
-    clientName:  { type: String, default: "" },
+    clientName:  { type: String, default: "", trim: true },
     deadline:    { type: String, default: "" },
+    priority: {
+      type:    String,
+      enum:    ["low", "medium", "high", "critical"],
+      default: "medium",
+    },
     status: {
       type:    String,
       enum:    ["planning", "in-progress", "completed", "on-hold"],
       default: "planning",
     },
-    budget:      { type: Number, default: 0, min: 0 },
-    spent:       { type: Number, default: 0, min: 0 },
-    progress:    { type: Number, default: 0, min: 0, max: 100 },
+    budget:   { type: Number, default: 0, min: 0 },
+    spent:    { type: Number, default: 0, min: 0 },
+    progress: { type: Number, default: 0, min: 0, max: 100 },
+
     managerId:   { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     teamMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+
+    milestones:      [milestoneSchema],
     documents:       [documentSchema],
+    dailyStatuses:   [dailyStatusSchema],
     workSubmissions: [workSubmissionSchema],
+
+    tags: [{ type: String, trim: true }],
   },
   { timestamps: true }
 );
 
-/* ── Indexes for common queries ── */
+/* indexes */
 projectSchema.index({ managerId: 1 });
 projectSchema.index({ teamMembers: 1 });
 projectSchema.index({ status: 1 });
+projectSchema.index({ priority: 1 });
 projectSchema.index({ createdAt: -1 });
 
-module.exports = mongoose.model("Project", projectSchema);
+module.exports = mongoose.models.Project || mongoose.model("Project", projectSchema);
