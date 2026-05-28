@@ -1,58 +1,45 @@
+// routes/projectRoutes.js
 const express = require("express");
 const router  = express.Router();
 const c       = require("../controllers/projectController");
 const { protect, authorize } = require("../middleware/auth");
 
-/* All routes require authentication */
 router.use(protect);
 
-/* ── Project CRUD ── */
-router.post(   "/",       authorize("admin"),                           c.createProject);
-router.post(   "/manual", authorize("admin"),                           c.createManualProject);
-router.get(    "/all",    authorize("admin", "manager", "hr"),          c.getAllProjects);
-router.get(    "/my",                                                   c.getMyProjects);
-router.put(    "/:id",    authorize("admin", "manager"),                c.updateProject);
-router.delete( "/:id",    authorize("admin"),                           c.deleteProject);
+/* ── CRITICAL: static helper paths BEFORE /:id ─────────────
+   If these come after /:id, Express treats "managers",
+   "all-users", "members" as MongoDB ObjectIds → 500 errors  */
+router.get("/managers",   authorize("admin", "manager", "hr"), c.getManagers);
+router.get("/members",    authorize("admin", "manager", "hr"), c.getMembers);
+router.get("/all-users",  authorize("admin", "manager", "hr"), c.getAllUsers);
 
-/* ── User helper routes ── */
-/*
-  /managers   — returns managers + admins (for the manager dropdown)
-  /members    — returns hr + employees (for member picker)
-  /all-users  — returns everyone active (full team picker used in forms)
-  Order matters: specific paths before /:id to avoid route conflicts.
-*/
-router.get("/managers",  authorize("admin"),                            c.getManagers);
-router.get("/members",   authorize("admin", "manager", "hr"),           c.getMembers);
-router.get("/all-users", authorize("admin", "manager", "hr"),           c.getAllUsers);
+/* ── Project CRUD ─────────────────────────────────────────── */
+router.post(   "/",       authorize("admin"),                   c.createProject);
+router.post(   "/manual", authorize("admin"),                   c.createManualProject);
+router.get(    "/all",    authorize("admin","manager","hr"),    c.getAllProjects);
+router.get(    "/my",                                           c.getMyProjects);
+router.get(    "/:id",    authorize("admin","manager","hr"),    c.getProjectById);
+router.put(    "/:id",    authorize("admin","manager"),         c.updateProject);
+router.delete( "/:id",    authorize("admin"),                   c.deleteProject);
 
-/* ── Documents ──
-   Upload / delete: Admin, Manager, HR only.
-   Employees are blocked at the route level (not just the UI).
-*/
-router.post(
-  "/:id/documents",
-  authorize("admin", "manager", "hr"),
-  c.uploadDocument
-);
-router.delete(
-  "/:id/documents/:docId",
-  authorize("admin", "manager", "hr"),
-  c.deleteDocument
-);
+/* ── Documents (Admin / Manager / HR only) ────────────────── */
+router.post(   "/:id/documents",           authorize("admin","manager","hr"), c.uploadDocument);
+router.delete( "/:id/documents/:docId",    authorize("admin","manager","hr"), c.deleteDocument);
 
-/* ── Work Submissions ──
-   Submit: any authenticated user (controller enforces membership check
-           for employees; HR submits freely; manager submits on own projects).
-   Delete: Admin and Manager only.
-*/
-router.post(
-  "/:id/submissions",
-  c.submitWork                                  /* no authorize() — controller checks membership */
+/* ── Daily Status ─────────────────────────────────────────── */
+// Submit: Manager / HR / Employee (controller checks membership)
+router.post("/:id/daily-status",                      c.submitDailyStatus);
+// Comment: Admin / Manager only
+router.patch(
+  "/:id/daily-status/:statusId/comment",
+  authorize("admin","manager"),
+  c.commentDailyStatus
 );
-router.delete(
-  "/:id/submissions/:subId",
-  authorize("admin", "manager"),
-  c.deleteSubmission
-);
+// Delete: Admin / Manager / own entry (controller checks)
+router.delete("/:id/daily-status/:statusId",          c.deleteDailyStatus);
+
+/* ── Work Submissions (legacy) ────────────────────────────── */
+router.post(   "/:id/submissions",          c.submitWork);
+router.delete( "/:id/submissions/:subId",  authorize("admin","manager"), c.deleteSubmission);
 
 module.exports = router;
