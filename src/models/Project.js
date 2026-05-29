@@ -3,12 +3,13 @@ const mongoose = require("mongoose");
 
 /* ────────────────────────────────────────────────────────────
    DOCUMENT  (contracts, specs, deliverables — Admin/HR/Manager)
+   url field stores base64 data-URL directly in MongoDB
 ──────────────────────────────────────────────────────────── */
 const documentSchema = new mongoose.Schema({
   name:       { type: String, required: true, trim: true },
   url:        { type: String, required: true },   // base64 data-URL stored in MongoDB
   fileType:   { type: String, default: "application/octet-stream" },
-  size:       { type: Number, default: 0 },       // bytes
+  size:       { type: Number, default: 0 },       // bytes (actual decoded size)
   category: {
     type:    String,
     enum:    ["contract", "specification", "design", "report", "invoice", "other"],
@@ -25,22 +26,22 @@ const documentSchema = new mongoose.Schema({
 const dailyStatusSchema = new mongoose.Schema({
   submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   date:        { type: Date, default: Date.now },
-  summary:     { type: String, required: true, trim: true },   // what was done today
+  summary:     { type: String, required: true, trim: true },
   hoursWorked: { type: Number, default: 0, min: 0, max: 24 },
-  blockers:    { type: String, default: "" },                  // impediments / blockers
-  nextPlan:    { type: String, default: "" },                  // plan for tomorrow
+  blockers:    { type: String, default: "" },
+  nextPlan:    { type: String, default: "" },
   mood: {
     type:    String,
     enum:    ["great", "good", "neutral", "struggling"],
     default: "good",
   },
-  managerComment: { type: String, default: "" },               // Admin/Manager reply
+  managerComment: { type: String, default: "" },
   commentedBy:    { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   commentedAt:    { type: Date, default: null },
 });
 
 /* ────────────────────────────────────────────────────────────
-   WORK SUBMISSION  (hours + description — legacy / kept for compatibility)
+   WORK SUBMISSION  (legacy — kept for backwards compatibility)
 ──────────────────────────────────────────────────────────── */
 const workSubmissionSchema = new mongoose.Schema({
   submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
