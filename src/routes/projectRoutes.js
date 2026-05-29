@@ -23,23 +23,16 @@ router.put(    "/:id",    authorize("admin","manager"),         c.updateProject)
 router.delete( "/:id",    authorize("admin"),                   c.deleteProject);
 
 /* ── Documents (Admin / Manager / HR only) ────────────────── */
-router.post(   "/:id/documents",           authorize("admin","manager","hr"), c.uploadDocument);
-router.delete( "/:id/documents/:docId",    authorize("admin","manager","hr"), c.deleteDocument);
+router.post(   "/:id/documents",        authorize("admin","manager","hr"), c.uploadDocument);
+router.delete( "/:id/documents/:docId", authorize("admin","manager","hr"), c.deleteDocument);
 
 /* ── Daily Status ─────────────────────────────────────────── */
-// Submit: Manager / HR / Employee (controller checks membership)
-router.post("/:id/daily-status",                      c.submitDailyStatus);
-// Comment: Admin / Manager only
-router.patch(
-  "/:id/daily-status/:statusId/comment",
-  authorize("admin","manager"),
-  c.commentDailyStatus
-);
-// Delete: Admin / Manager / own entry (controller checks)
-router.delete("/:id/daily-status/:statusId",          c.deleteDailyStatus);
+router.post(   "/:id/daily-status",                                          c.submitDailyStatus);
+router.patch(  "/:id/daily-status/:statusId/comment", authorize("admin","manager"), c.commentDailyStatus);
+router.delete( "/:id/daily-status/:statusId",                                c.deleteDailyStatus);
 
 /* ── Work Submissions (legacy) ────────────────────────────── */
-router.post(   "/:id/submissions",          c.submitWork);
+router.post(   "/:id/submissions",         c.submitWork);
 router.delete( "/:id/submissions/:subId",  authorize("admin","manager"), c.deleteSubmission);
 
 module.exports = router;
