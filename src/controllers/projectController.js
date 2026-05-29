@@ -3,16 +3,50 @@ const Project = require("../models/Project");
 const User    = require("../models/User");
 
 /* ════════════════════════════════════════════════════════════
+   CONSTANTS
+════════════════════════════════════════════════════════════ */
+const MAX_DOC_SIZE        = 10 * 1024 * 1024;   // 10 MB per file
+const MAX_PROJECT_STORAGE = 14 * 1024 * 1024;   // 14 MB total per project (safe under 16 MB BSON limit)
+
+const ALLOWED_FILE_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp",
+  "text/plain", "application/zip",
+];
+
+/* ════════════════════════════════════════════════════════════
+   HELPERS
+════════════════════════════════════════════════════════════ */
+
+/** Estimate actual byte size from a base64 string or data-URL */
+const estimateBase64Bytes = (dataUrl = "") => {
+  const b64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+  // base64 encodes 3 bytes as 4 chars; subtract padding
+  const padding = (b64.match(/=+$/) || [""])[0].length;
+  return Math.ceil((b64.length * 3) / 4) - padding;
+};
+
+/** Calculate total bytes currently stored in project.documents */
+const projectDocStorageBytes = (project) =>
+  project.documents.reduce((sum, d) => sum + estimateBase64Bytes(d.url || ""), 0);
+
+/* ════════════════════════════════════════════════════════════
    POPULATE HELPER
 ════════════════════════════════════════════════════════════ */
 const populateProject = (query) =>
   query
-    .populate("managerId",                        "name email role")
-    .populate("teamMembers",                      "name email role department designation")
-    .populate("documents.uploadedBy",             "name email role")
-    .populate("workSubmissions.submittedBy",       "name email role")
-    .populate("dailyStatuses.submittedBy",         "name email role")
-    .populate("dailyStatuses.commentedBy",         "name email role");
+    .populate("managerId",                  "name email role")
+    .populate("teamMembers",                "name email role department designation")
+    .populate("documents.uploadedBy",       "name email role")
+    .populate("workSubmissions.submittedBy","name email role")
+    .populate("dailyStatuses.submittedBy",  "name email role")
+    .populate("dailyStatuses.commentedBy",  "name email role");
 
 /* ════════════════════════════════════════════════════════════
    CREATE  (Admin only)
@@ -131,9 +165,9 @@ const getMyProjects = async (req, res) => {
     );
 
     const sanitised = projects.map((p) => {
-      const obj        = p.toObject();
-      obj.documents    = [];  // employees cannot see documents
-      obj.dailyStatuses = obj.dailyStatuses.filter(
+      const obj           = p.toObject();
+      obj.documents       = [];   // employees cannot see documents
+      obj.dailyStatuses   = obj.dailyStatuses.filter(
         (d) => d.submittedBy?._id?.toString() === uid.toString()
       );
       obj.workSubmissions = obj.workSubmissions.filter(
@@ -164,15 +198,15 @@ const getProjectById = async (req, res) => {
     if (role === "admin" || role === "manager" || role === "hr")
       return res.status(200).json({ success: true, project });
 
-    const isMember  = project.teamMembers.some((m) => m._id.toString() === uid);
-    const isMgr     = project.managerId?._id?.toString() === uid;
+    const isMember = project.teamMembers.some((m) => m._id.toString() === uid);
+    const isMgr    = project.managerId?._id?.toString() === uid;
 
     if (!isMember && !isMgr)
       return res.status(403).json({ success: false, message: "Access denied." });
 
-    const obj         = project.toObject();
-    obj.documents     = [];
-    obj.dailyStatuses = obj.dailyStatuses.filter(
+    const obj           = project.toObject();
+    obj.documents       = [];
+    obj.dailyStatuses   = obj.dailyStatuses.filter(
       (d) => d.submittedBy?._id?.toString() === uid
     );
     obj.workSubmissions = obj.workSubmissions.filter(
@@ -212,11 +246,10 @@ const updateProject = async (req, res) => {
       ];
       fields.forEach((k) => {
         if (req.body[k] !== undefined) {
-          if (k === "name") project[k] = req.body[k].trim();
-          else if (k === "budget" || k === "spent" || k === "progress")
-            project[k] = Number(req.body[k]);
-          else if (k === "managerId") project[k] = req.body[k] || null;
-          else project[k] = req.body[k];
+          if      (k === "name")                            project[k] = req.body[k].trim();
+          else if (["budget","spent","progress"].includes(k)) project[k] = Number(req.body[k]);
+          else if (k === "managerId")                       project[k] = req.body[k] || null;
+          else                                              project[k] = req.body[k];
         }
       });
     }
@@ -247,56 +280,79 @@ const deleteProject = async (req, res) => {
 
 /* ════════════════════════════════════════════════════════════
    UPLOAD DOCUMENT  (Admin / Manager / HR only)
-   Base64 data-URL stored directly in MongoDB
+   ─────────────────────────────────────────────────────────
+   Flow:
+     1. Validate name, url, fileType
+     2. Estimate decoded byte size from base64 — authoritative check
+     3. Guard against total project storage exceeding 14 MB
+     4. Push document subdoc and save
+     5. Return populated project
+   
+   Documents are stored as base64 data-URLs in MongoDB Atlas.
+   In Atlas UI: projects collection → documents[] → url field
+   (Atlas truncates long strings in the UI, but the full data is there)
 ════════════════════════════════════════════════════════════ */
-const ALLOWED_FILE_TYPES = [
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "image/png","image/jpeg","image/jpg","image/gif","image/webp",
-  "text/plain","application/zip",
-];
-const MAX_DOC_SIZE = 10 * 1024 * 1024;
-
 const uploadDocument = async (req, res) => {
   try {
     const { name, url, fileType, size, category } = req.body;
 
+    /* ── Basic validation ── */
     if (!name?.trim())
       return res.status(400).json({ success: false, message: "Document name is required." });
     if (!url?.trim())
-      return res.status(400).json({ success: false, message: "Document data is required." });
+      return res.status(400).json({ success: false, message: "Document data (base64) is required." });
     if (fileType && !ALLOWED_FILE_TYPES.includes(fileType))
       return res.status(400).json({ success: false, message: `File type "${fileType}" is not allowed.` });
 
-    const docSize    = Number(size) || 0;
-    const base64Data = url.includes(",") ? url.split(",")[1] : url;
-    const estimated  = Math.ceil((base64Data.length * 3) / 4);
-    if (docSize > MAX_DOC_SIZE || estimated > MAX_DOC_SIZE)
-      return res.status(400).json({ success: false, message: "File size exceeds the 10 MB limit." });
+    /* ── Per-file size check (authoritative — based on actual base64 content) ── */
+    const fileBytes = estimateBase64Bytes(url);
+    if (fileBytes > MAX_DOC_SIZE)
+      return res.status(400).json({
+        success: false,
+        message: `File too large: ~${(fileBytes / 1048576).toFixed(1)} MB. Maximum per file is 10 MB.`,
+      });
 
+    /* ── Load project ── */
     const project = await Project.findById(req.params.id);
     if (!project)
       return res.status(404).json({ success: false, message: "Project not found." });
 
+    /* ── Total project storage guard (MongoDB 16 MB BSON limit) ── */
+    const currentStorage = projectDocStorageBytes(project);
+    if (currentStorage + fileBytes > MAX_PROJECT_STORAGE)
+      return res.status(400).json({
+        success: false,
+        message: `Project storage limit reached. Currently using ~${(currentStorage / 1048576).toFixed(1)} MB of 14 MB. Remove older documents before uploading.`,
+      });
+
+    /* ── Store document ── */
     project.documents.push({
       name:       name.trim(),
-      url:        url.trim(),
+      url:        url.trim(),           // full base64 data-URL → stored in MongoDB Atlas
       fileType:   fileType || "application/octet-stream",
-      size:       docSize,
+      size:       fileBytes,            // actual decoded bytes (more accurate than client-reported)
       category:   category || "other",
       uploadedBy: req.user._id,
     });
 
     await project.save();
+
     const populated = await populateProject(Project.findById(project._id));
     res.status(200).json({ success: true, project: populated });
   } catch (err) {
     console.error("uploadDocument:", err.message);
+
+    /* MongoDB BSON 16 MB limit hit despite our guard */
+    if (
+      err.message?.toLowerCase().includes("document too large") ||
+      err.code === 10334
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "MongoDB document size limit exceeded (16 MB). Remove existing documents and try again.",
+      });
+    }
+
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -328,9 +384,6 @@ const deleteDocument = async (req, res) => {
 
 /* ════════════════════════════════════════════════════════════
    SUBMIT DAILY STATUS
-   Who can submit: Manager, HR, Employee (assigned)
-   Who can view all: Admin, Manager of the project
-   Employee sees only own entries
 ════════════════════════════════════════════════════════════ */
 const submitDailyStatus = async (req, res) => {
   try {
@@ -349,12 +402,11 @@ const submitDailyStatus = async (req, res) => {
     if (role === "admin")
       return res.status(403).json({ success: false, message: "Admins do not submit daily status." });
 
-    const isMember  = project.teamMembers.some((m) => m.toString() === uid);
-    const isMgr     = project.managerId?.toString() === uid;
+    const isMember = project.teamMembers.some((m) => m.toString() === uid);
+    const isMgr    = project.managerId?.toString() === uid;
 
     if (role === "employee" && !isMember)
       return res.status(403).json({ success: false, message: "You are not assigned to this project." });
-
     if (role === "manager" && !isMgr && !isMember)
       return res.status(403).json({ success: false, message: "You are not the manager of this project." });
 
@@ -362,9 +414,9 @@ const submitDailyStatus = async (req, res) => {
       submittedBy: req.user._id,
       summary:     summary.trim(),
       hoursWorked: Math.max(0, Number(hoursWorked) || 0),
-      blockers:    blockers    || "",
-      nextPlan:    nextPlan    || "",
-      mood:        mood        || "good",
+      blockers:    blockers || "",
+      nextPlan:    nextPlan || "",
+      mood:        mood     || "good",
     });
 
     await project.save();
@@ -377,7 +429,7 @@ const submitDailyStatus = async (req, res) => {
 };
 
 /* ════════════════════════════════════════════════════════════
-   ADD COMMENT TO DAILY STATUS  (Admin / Manager)
+   COMMENT ON DAILY STATUS  (Admin / Manager)
 ════════════════════════════════════════════════════════════ */
 const commentDailyStatus = async (req, res) => {
   try {
@@ -422,7 +474,6 @@ const deleteDailyStatus = async (req, res) => {
     if (!entry)
       return res.status(404).json({ success: false, message: "Daily status not found." });
 
-    // Only admin, manager, or the owner can delete
     const isOwner = entry.submittedBy?.toString() === uid;
     if (role !== "admin" && role !== "manager" && !isOwner)
       return res.status(403).json({ success: false, message: "Not authorised to delete this entry." });
@@ -441,7 +492,7 @@ const deleteDailyStatus = async (req, res) => {
 };
 
 /* ════════════════════════════════════════════════════════════
-   SUBMIT WORK  (legacy — kept for backwards compatibility)
+   SUBMIT WORK  (legacy)
 ════════════════════════════════════════════════════════════ */
 const submitWork = async (req, res) => {
   try {
@@ -459,8 +510,8 @@ const submitWork = async (req, res) => {
     if (role === "admin")
       return res.status(403).json({ success: false, message: "Admins do not submit work." });
 
-    const isMember  = project.teamMembers.some((m) => m.toString() === uid);
-    const isMgr     = project.managerId?.toString() === uid;
+    const isMember = project.teamMembers.some((m) => m.toString() === uid);
+    const isMgr    = project.managerId?.toString() === uid;
 
     if (role === "employee" && !isMember)
       return res.status(403).json({ success: false, message: "You are not assigned to this project." });
