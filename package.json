@@ -20,6 +20,7 @@
     "mongoose": "^8.4.1",
     "morgan": "^1.10.0",
     "nodemailer": "^8.0.7",
+    "pdfkit": "^0.18.0",
     "relaymail": "^1.0.2",
     "stream-chat": "^9.43.1"
   },
