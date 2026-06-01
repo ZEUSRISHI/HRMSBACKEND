@@ -6,26 +6,36 @@ const Leave       = require("../models/Leave");
 const PDFDocument = require("pdfkit");
 const path        = require("path");
 const fs          = require("fs");
+const https       = require("https");
 
-/* ─── Logo path ─────────────────────────────────────────────── */
-// Save your logo PNG at: <project-root>/src/assets/quibo-logo.png
-const LOGO_PATH = "https://raw.githubusercontent.com/ZEUSRISHI/HRMS-/main/src/assets/quibo-logo.png";
+/* ─── Logo: fetch from GitHub raw URL ───────────────────────── */
+const LOGO_URL = "https://raw.githubusercontent.com/ZEUSRISHI/HRMS-/main/src/assets/quibo-logo.png";
 
-/* ─── Read logo as base64 once at startup ───────────────────── */
-let LOGO_BASE64 = "";
+let LOGO_BASE64     = "";
 let LOGO_BASE64_SRC = "";
-try {
-  if (fs.existsSync(LOGO_PATH)) {
-    const buf = fs.readFileSync(LOGO_PATH);
-    LOGO_BASE64 = buf.toString("base64");
-    LOGO_BASE64_SRC = `data:image/png;base64,${LOGO_BASE64}`;
-    console.log("✅ Quibo logo loaded from:", LOGO_PATH);
-  } else {
-    console.warn("⚠️  Logo not found at:", LOGO_PATH);
-  }
-} catch (err) {
-  console.warn("⚠️  Failed to read logo:", err.message);
+
+function fetchLogoFromURL(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      const chunks = [];
+      res.on("data", c => chunks.push(c));
+      res.on("end",  () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    }).on("error", reject);
+  });
 }
+
+/* ─── Load logo once at startup ─────────────────────────────── */
+(async () => {
+  try {
+    const buf       = await fetchLogoFromURL(LOGO_URL);
+    LOGO_BASE64     = buf.toString("base64");
+    LOGO_BASE64_SRC = `data:image/png;base64,${LOGO_BASE64}`;
+    console.log("✅ Quibo logo loaded from GitHub");
+  } catch (err) {
+    console.warn("⚠️  Failed to load logo:", err.message);
+  }
+})();
 
 /* ─── Salary Breakdown ──────────────────────────────────────── */
 function getSalaryBreakdown(netSalary) {
