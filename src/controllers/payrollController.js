@@ -7,124 +7,27 @@ const PDFDocument = require("pdfkit");
 const path        = require("path");
 const fs          = require("fs");
 
-/* ─── Logo path ────────────────────────────────────────────── */
-const LOGO_PATH = path.resolve(__dirname, "..", "..", "src", "assets", "hrms-login.png");
+/* ─── Logo path ─────────────────────────────────────────────── */
+// Save your logo PNG at: <project-root>/src/assets/quibo-logo.png
+const LOGO_PATH = path.resolve("C:/hrms2/HRMS--main/HRMS--main/src/assets/quibo-logo.png");
 
-/* ─── Draw Quibo Tech Logo (PDFKit vector) ─────────────────── */
-// Draws the exact Quibo Tech logo:
-//   - Large black outer ring (donut)
-//   - Black inner circle (offset upper-left inside the ring)
-//   - Orange crescent arc (lower-right quadrant)
-//   - Small orange dot (lower-right)
-function drawQuiboLogo(doc, x, y, size) {
-  const cx = x + size / 2;
-  const cy = y + size / 2;
-  const R  = size / 2;          // outer radius
-  const strokeW = R * 0.28;     // ring stroke thickness
-
-  doc.save();
-
-  // 1. Large black outer ring (drawn as a thick-stroked circle)
-  doc.circle(cx, cy, R - strokeW / 2)
-     .lineWidth(strokeW)
-     .strokeColor("#1a1a1a")
-     .stroke();
-
-  // 2. Black inner circle — offset upper-left
-  const innerR  = R * 0.38;
-  const offsetX = -R * 0.18;
-  const offsetY = -R * 0.18;
-  doc.circle(cx + offsetX, cy + offsetY, innerR)
-     .fillColor("#1a1a1a")
-     .fill();
-
-  // 3. Orange crescent arc — lower-right quadrant of the ring
-  //    Drawn as a thick arc from ~330° to ~90° (going clockwise through 0°)
-  //    PDFKit arc: arc(x, y, radius, startAngle, endAngle, anticlockwise)
-  //    angles in radians, 0 = right, going clockwise
-  const arcStartDeg = 310;
-  const arcEndDeg   = 100;
-  const arcStartRad = (arcStartDeg * Math.PI) / 180;
-  const arcEndRad   = (arcEndDeg   * Math.PI) / 180;
-  const arcR        = R - strokeW / 2;
-
-  doc.path(
-    arcPath(cx, cy, arcR, arcStartRad, arcEndRad, false)
-  )
-  .lineWidth(strokeW)
-  .strokeColor("#f97316")
-  .stroke();
-
-  // 4. Small orange dot — lower-right
-  const dotR  = R * 0.13;
-  const dotCx = cx + R * 0.52;
-  const dotCy = cy + R * 0.52;
-  doc.circle(dotCx, dotCy, dotR)
-     .fillColor("#f97316")
-     .fill();
-
-  doc.restore();
+/* ─── Read logo as base64 once at startup ───────────────────── */
+let LOGO_BASE64 = "";
+let LOGO_BASE64_SRC = "";
+try {
+  if (fs.existsSync(LOGO_PATH)) {
+    const buf = fs.readFileSync(LOGO_PATH);
+    LOGO_BASE64 = buf.toString("base64");
+    LOGO_BASE64_SRC = `data:image/png;base64,${LOGO_BASE64}`;
+    console.log("✅ Quibo logo loaded from:", LOGO_PATH);
+  } else {
+    console.warn("⚠️  Logo not found at:", LOGO_PATH);
+  }
+} catch (err) {
+  console.warn("⚠️  Failed to read logo:", err.message);
 }
 
-// Helper: generate SVG arc path string for PDFKit .path()
-function arcPath(cx, cy, r, startAngle, endAngle, anticlockwise) {
-  const startX = cx + r * Math.cos(startAngle);
-  const startY = cy + r * Math.sin(startAngle);
-  const endX   = cx + r * Math.cos(endAngle);
-  const endY   = cy + r * Math.sin(endAngle);
-
-  // large-arc-flag: 1 if arc > 180 degrees
-  let delta = endAngle - startAngle;
-  if (anticlockwise) delta = -delta;
-  if (delta < 0)     delta += 2 * Math.PI;
-  const largeArc = delta > Math.PI ? 1 : 0;
-  const sweep    = anticlockwise ? 0 : 1;
-
-  return `M ${startX} ${startY} A ${r} ${r} 0 ${largeArc} ${sweep} ${endX} ${endY}`;
-}
-
-/* ─── Quibo Tech logo as inline SVG for email HTML ─────────── */
-function quiboLogoSVG(size = 50) {
-  const cx = size / 2;
-  const cy = size / 2;
-  const R  = size / 2;
-  const strokeW = R * 0.28;
-
-  // Inner circle offset
-  const innerR  = R * 0.38;
-  const icx     = cx - R * 0.18;
-  const icy     = cy - R * 0.18;
-
-  // Orange arc: from 310° to 100° clockwise
-  const arcR   = R - strokeW / 2;
-  const startRad = (310 * Math.PI) / 180;
-  const endRad   = (100 * Math.PI) / 180;
-  const sx = cx + arcR * Math.cos(startRad);
-  const sy = cy + arcR * Math.sin(startRad);
-  const ex = cx + arcR * Math.cos(endRad);
-  const ey = cy + arcR * Math.sin(endRad);
-  // Arc is ~150°, so large-arc = 0, sweep = 1
-  const arcD = `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${arcR.toFixed(2)} ${arcR.toFixed(2)} 0 0 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
-
-  // Small dot
-  const dotR  = R * 0.13;
-  const dcx   = cx + R * 0.52;
-  const dcy   = cy + R * 0.52;
-
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
-  <!-- Outer black ring -->
-  <circle cx="${cx}" cy="${cy}" r="${(R - strokeW / 2).toFixed(2)}"
-    fill="none" stroke="#1a1a1a" stroke-width="${strokeW.toFixed(2)}"/>
-  <!-- Inner black circle (upper-left offset) -->
-  <circle cx="${icx.toFixed(2)}" cy="${icy.toFixed(2)}" r="${innerR.toFixed(2)}" fill="#1a1a1a"/>
-  <!-- Orange crescent arc (lower-right) -->
-  <path d="${arcD}" fill="none" stroke="#f97316" stroke-width="${strokeW.toFixed(2)}" stroke-linecap="round"/>
-  <!-- Orange dot -->
-  <circle cx="${dcx.toFixed(2)}" cy="${dcy.toFixed(2)}" r="${dotR.toFixed(2)}" fill="#f97316"/>
-</svg>`;
-}
-
-/* ─── Salary Breakdown ─────────────────────────────────────── */
+/* ─── Salary Breakdown ──────────────────────────────────────── */
 function getSalaryBreakdown(netSalary) {
   const n = Math.round(netSalary);
   if (n <= 10000) {
@@ -143,7 +46,7 @@ function getSalaryBreakdown(netSalary) {
   }
 }
 
-/* ─── Number to Words ──────────────────────────────────────── */
+/* ─── Number to Words ───────────────────────────────────────── */
 function numberToWords(num) {
   const a = ["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine",
     "Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen",
@@ -162,12 +65,12 @@ function numberToWords(num) {
   return inWords(Math.round(num));
 }
 
-/* ─── Format money ─────────────────────────────────────────── */
+/* ─── Format money ──────────────────────────────────────────── */
 function fmtPDF(n) {
   return "Rs." + (n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/* ─── Generate PDF ─────────────────────────────────────────── */
+/* ─── Generate PDF ──────────────────────────────────────────── */
 function generatePayslipPDF({
   name, employeeId, role, month,
   workingDays, presentDays, leaveDays,
@@ -193,7 +96,7 @@ function generatePayslipPDF({
 
     const payDateStr = paymentDate
       ? new Date(paymentDate).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })
-      : new Date().toLocaleDateString("en-IN",             { day: "2-digit", month: "2-digit", year: "numeric" });
+      : new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
 
     const bd      = getSalaryBreakdown(netSalary);
     const lopDays = leaveDays || 0;
@@ -207,40 +110,38 @@ function generatePayslipPDF({
     const logoX    = margin;
     const logoY    = 18;
 
-    // Try to embed the PNG logo first; fall back to vector drawing
-    let logoEmbedded = false;
-    try {
-      if (fs.existsSync(LOGO_PATH)) {
-        doc.image(LOGO_PATH, logoX, logoY, { width: logoSize, height: logoSize });
-        logoEmbedded = true;
-      }
-    } catch (err) {
-      console.warn("[Payslip PDF] Failed to embed logo:", err.message);
+    /* ── Embed logo image ── */
+    if (LOGO_BASE64) {
+      // Pass the buffer directly to PDFKit from base64
+      const logoBuf = Buffer.from(LOGO_BASE64, "base64");
+      doc.image(logoBuf, logoX, logoY, { width: logoSize, height: logoSize });
+    } else {
+      // Fallback: simple black rounded square with orange Q
+      doc.save();
+      doc.roundedRect(logoX, logoY, logoSize, logoSize, 8).fill("#1a1a1a");
+      doc.fillColor("#f97316").font("Helvetica-Bold").fontSize(26)
+         .text("Q", logoX, logoY + 11, { width: logoSize, align: "center", lineBreak: false });
+      doc.restore();
     }
 
-    // Fallback: draw the real Quibo Tech logo as PDFKit vector shapes
-    if (!logoEmbedded) {
-      drawQuiboLogo(doc, logoX, logoY, logoSize);
-    }
-
-    // "Quibo Tech" company name
+    /* ── Company name ── */
     doc.fillColor("#1a1a1a").font("Helvetica-Bold").fontSize(20)
        .text("Quibo Tech", logoX + logoSize + 10, logoY + 6, { lineBreak: false });
 
-    // Address lines
+    /* ── Address ── */
     doc.fillColor("#64748b").font("Helvetica").fontSize(7.5)
        .text("10th Floor, Millennia Business Park Campus II, Dr, MGR Main Rd,",
              logoX + logoSize + 10, logoY + 30)
        .text("Kandhanchavadi, Perungudi, Chennai, Chennai-600096 India",
              logoX + logoSize + 10, logoY + 41);
 
-    // Right: pay slip label
+    /* ── Pay slip label (right) ── */
     doc.fillColor("#475569").font("Helvetica").fontSize(9)
        .text("Pay slip For the Month", pW - margin - 160, logoY + 8, { align: "right", width: 160, lineBreak: false });
     doc.fillColor("#1a1a1a").font("Helvetica-Bold").fontSize(14)
        .text(monthLabel, pW - margin - 160, logoY + 24, { align: "right", width: 160, lineBreak: false });
 
-    // Divider
+    /* ── Divider ── */
     doc.moveTo(margin, 78).lineTo(pW - margin, 78)
        .strokeColor("#e2e8f0").lineWidth(0.8).stroke();
 
@@ -253,11 +154,10 @@ function generatePayslipPDF({
     const labelX = margin;
     const colonX = margin + 98;
     const valueX = margin + 108;
-
     const displayEmployeeId = employeeId ? String(employeeId) : "—";
 
     const details = [
-      ["Employee Name", name  || "—"],
+      ["Employee Name", name || "—"],
       ["Employee ID",   displayEmployeeId],
       ["Pay Period",    monthLabel],
       ["Pay Date",      payDateStr],
@@ -286,9 +186,7 @@ function generatePayslipPDF({
 
     doc.fillColor("#1a1a1a").font("Helvetica-Bold").fontSize(17)
        .text(fmtPDF(netSalary), boxX + 10, boxY + 12, {
-         width:     boxW - 16,
-         lineBreak: false,
-         align:     "left",
+         width: boxW - 16, lineBreak: false, align: "left",
        });
 
     doc.fillColor("#22c55e").font("Helvetica").fontSize(9)
@@ -343,13 +241,13 @@ function generatePayslipPDF({
     const c4 = tX + tW - 8;
 
     doc.fillColor("#374151").font("Helvetica-Bold").fontSize(8.5)
-       .text("EARNINGS",   c1,       y + 9, { lineBreak: false });
+       .text("EARNINGS",   c1,      y + 9, { lineBreak: false });
     doc.fillColor("#374151").font("Helvetica-Bold").fontSize(8.5)
-       .text("AMOUNT",     c2 - 55,  y + 9, { width: 55, align: "right", lineBreak: false });
+       .text("AMOUNT",     c2 - 55, y + 9, { width: 55, align: "right", lineBreak: false });
     doc.fillColor("#374151").font("Helvetica-Bold").fontSize(8.5)
-       .text("DEDUCTIONS", c3,       y + 9, { lineBreak: false });
+       .text("DEDUCTIONS", c3,      y + 9, { lineBreak: false });
     doc.fillColor("#374151").font("Helvetica-Bold").fontSize(8.5)
-       .text("AMOUNT",     c4 - 55,  y + 9, { width: 55, align: "right", lineBreak: false });
+       .text("AMOUNT",     c4 - 55, y + 9, { width: 55, align: "right", lineBreak: false });
 
     doc.moveTo(tX + halfW, y).lineTo(tX + halfW, y + tH)
        .strokeColor("#e2e8f0").lineWidth(0.8).stroke();
@@ -378,7 +276,7 @@ function generatePayslipPDF({
          .strokeColor("#f1f5f9").lineWidth(0.3).stroke();
     }
 
-    // Totals row
+    /* ── Totals row ── */
     doc.rect(tX, rowY, tW, 26).fill("#f1f5f9");
     doc.moveTo(tX, rowY).lineTo(tX + tW, rowY)
        .strokeColor("#e2e8f0").lineWidth(0.8).stroke();
@@ -407,9 +305,7 @@ function generatePayslipPDF({
 
     doc.fillColor("#16a34a").font("Helvetica-Bold").fontSize(13)
        .text(fmtPDF(netSalary), tX + tW - 130, y + 11, {
-         width:     120,
-         align:     "right",
-         lineBreak: false,
+         width: 120, align: "right", lineBreak: false,
        });
 
     y += npH + 14;
@@ -442,7 +338,7 @@ function generatePayslipPDF({
   });
 }
 
-/* ─── Send Email via Brevo ─────────────────────────────────── */
+/* ─── Send Email via Brevo ──────────────────────────────────── */
 async function sendPayslipEmail({
   to, name, employeeId, role, month, periodStart, periodEnd,
   workingDays, presentDays, leaveDays, paidLeaveDays,
@@ -477,12 +373,14 @@ async function sendPayslipEmail({
   })();
 
   const absentDays        = Math.max(0, workingDays - presentDays - leaveDays);
-  const modeLabel         = (paymentMode || "bank_transfer").replace(/_/g," ").replace(/\b\w/g, c => c.toUpperCase());
+  const modeLabel         = (paymentMode || "bank_transfer").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   const bd                = getSalaryBreakdown(netSalary);
   const displayEmployeeId = employeeId ? String(employeeId) : "—";
 
-  // Use inline SVG logo for email (always works, no file dependency)
-  const logoSvgInline = quiboLogoSVG(50);
+  /* ── Logo for email: use base64 src if available ── */
+  const logoImgTag = LOGO_BASE64_SRC
+    ? `<img src="${LOGO_BASE64_SRC}" width="50" height="50" style="display:block;border-radius:8px;" alt="Quibo Tech Logo"/>`
+    : `<div style="width:50px;height:50px;background:#1a1a1a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;color:#f97316;font-family:Arial">Q</div>`;
 
   let pdfBase64 = "";
   try {
@@ -526,8 +424,8 @@ async function sendPayslipEmail({
   <tr><td style="background:linear-gradient(135deg,#0f172a 0%,#1c2e4a 50%,#0f172a 100%);padding:28px 32px 0">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
       <tr>
-        <td style="vertical-align:middle;padding-right:14px;width:58px">
-          ${logoSvgInline}
+        <td style="vertical-align:middle;padding-right:14px;width:64px">
+          ${logoImgTag}
         </td>
         <td style="vertical-align:middle">
           <p style="font-size:20px;font-weight:800;color:#ffffff;margin:0;letter-spacing:-0.3px">Quibo Tech</p>
@@ -603,8 +501,6 @@ async function sendPayslipEmail({
     <p style="font-size:10px;font-weight:900;color:#64748b;text-transform:uppercase;letter-spacing:2px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #f1f5f9">
       Salary Breakdown &mdash; ${monthLabel}
     </p>
-
-    <!-- Earnings -->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
       style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:8px">
       <tr style="background:#f8fafc">
@@ -612,7 +508,7 @@ async function sendPayslipEmail({
         <td style="font-size:9px;font-weight:900;color:#64748b;text-transform:uppercase;letter-spacing:1px;padding:8px 12px;border-bottom:1px solid #e2e8f0;text-align:right">AMOUNT</td>
       </tr>
       ${earningRows.map(([lbl, amt], i) => `
-      <tr style="${i%2===1?"background:#fafafa":""}">
+      <tr style="${i % 2 === 1 ? "background:#fafafa" : ""}">
         <td style="font-size:12px;color:#475569;padding:8px 12px;border-bottom:1px solid #f1f5f9">${lbl}</td>
         <td style="font-size:12px;font-weight:700;color:#1e293b;padding:8px 12px;text-align:right;border-bottom:1px solid #f1f5f9;white-space:nowrap">${fmtEmailFull(amt)}</td>
       </tr>`).join("")}
@@ -621,8 +517,6 @@ async function sendPayslipEmail({
         <td style="font-size:13px;font-weight:900;color:#16a34a;padding:8px 12px;text-align:right;border-top:1px solid #e2e8f0;white-space:nowrap">${fmtEmailFull(bd.gross)}</td>
       </tr>
     </table>
-
-    <!-- Deductions -->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
       style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:8px">
       <tr style="background:#f8fafc">
@@ -642,8 +536,6 @@ async function sendPayslipEmail({
         <td style="font-size:13px;font-weight:900;color:#dc2626;padding:8px 12px;text-align:right;border-top:1px solid #e2e8f0;white-space:nowrap">${fmtEmailFull(0)}</td>
       </tr>
     </table>
-
-    <!-- Net payable -->
     <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 16px;margin-bottom:10px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
         <tr>
@@ -657,7 +549,6 @@ async function sendPayslipEmail({
         </tr>
       </table>
     </div>
-
     <p style="font-size:11px;color:#475569;text-align:right;margin:0">
       Amount In Words: <strong style="color:#1e293b">Indian Rupee ${numberToWords(netSalary)} Only</strong>
     </p>
@@ -698,7 +589,7 @@ async function sendPayslipEmail({
           <p style="font-size:10px;color:#94a3b8;margin:2px 0 0">System-generated payslip. No signature required.</p>
         </td>
         <td align="right" class="hide-mob">
-          <p style="font-size:10px;color:#94a3b8;margin:0">Generated: ${new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</p>
+          <p style="font-size:10px;color:#94a3b8;margin:0">Generated: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
           <p style="font-size:10px;color:#cbd5e1;margin:2px 0 0">HRMS v1.0 &middot; Confidential</p>
         </td>
       </tr>
@@ -721,7 +612,7 @@ async function sendPayslipEmail({
   if (pdfBase64) {
     payload.attachment = [{
       content: pdfBase64,
-      name:    `Payslip_${(name || "Employee").replace(/\s+/g,"_")}_${month}.pdf`,
+      name:    `Payslip_${(name || "Employee").replace(/\s+/g, "_")}_${month}.pdf`,
     }];
   }
 
@@ -739,7 +630,7 @@ async function sendPayslipEmail({
   }
 }
 
-/* ─── calcSalary ────────────────────────────────────────────── */
+/* ─── calcSalary ─────────────────────────────────────────────── */
 function calcSalary({ basicSalary, workingDays, presentDays, leaveDays, paidLeaveDays }) {
   const wDays  = Math.max(1, Number(workingDays)   || 26);
   const pDays  = Math.max(0, Number(presentDays)   || 0);
@@ -753,7 +644,7 @@ function calcSalary({ basicSalary, workingDays, presentDays, leaveDays, paidLeav
   return { earnedBasic, grossSalary: earnedBasic, netSalary: earnedBasic };
 }
 
-/* ─── Month helpers ─────────────────────────────────────────── */
+/* ─── Month helpers ──────────────────────────────────────────── */
 function monthBounds(monthStr) {
   const [year, month] = monthStr.split("-").map(Number);
   return { start: new Date(year, month - 1, 1), end: new Date(year, month, 0) };
@@ -764,7 +655,7 @@ function countWorkingDays(start, end) {
   return count;
 }
 
-/* ─── Attendance helper ─────────────────────────────────────── */
+/* ─── Attendance helper ──────────────────────────────────────── */
 async function getAttendanceData(userId, start, end, workingDays) {
   let leaveDays = 0;
   try {
@@ -783,7 +674,7 @@ async function getAttendanceData(userId, start, end, workingDays) {
   return { leaveDays, presentDays: Math.max(0, presentDays) };
 }
 
-/* ═══════════════════ CONTROLLERS ═══════════════════════════ */
+/* ══════════════════ CONTROLLERS ════════════════════════════ */
 
 const createPayroll = async (req, res) => {
   try {
@@ -810,14 +701,14 @@ const createPayroll = async (req, res) => {
     const { leaveDays, presentDays } = await getAttendanceData(userId, start, end, workingDays);
     const calc = calcSalary({
       basicSalary:   Number(basicSalary),
-      workingDays,   presentDays,  leaveDays,
+      workingDays,   presentDays, leaveDays,
       paidLeaveDays: Number(paidLeaveDays),
     });
 
     const payroll = await Payroll.create({
       userId, month, periodStart: start, periodEnd: end,
       role:          user.role,
-      workingDays,   presentDays,  leaveDays,
+      workingDays,   presentDays, leaveDays,
       paidLeaveDays: Number(paidLeaveDays),
       basicSalary:   Number(basicSalary),
       earnedBasic:   calc.earnedBasic,
@@ -838,12 +729,12 @@ const getAllPayroll = async (req, res) => {
   try {
     const { month, status, role, startDate, endDate } = req.query;
     const filter = {};
-    if (month)              filter.month       = month;
-    if (status)             filter.status      = status;
-    if (role)               filter.role        = role;
+    if (month)  filter.month  = month;
+    if (status) filter.status = status;
+    if (role)   filter.role   = role;
     if (startDate && endDate) {
       filter.periodStart = { $gte: new Date(startDate) };
-      filter.periodEnd   = { $lte: new Date(endDate)   };
+      filter.periodEnd   = { $lte: new Date(endDate) };
     }
     const records = await Payroll.find(filter)
       .populate("userId", "name email role department employeeId")
@@ -893,9 +784,9 @@ const updatePayroll = async (req, res) => {
 const processPayroll = async (req, res) => {
   try {
     const { month } = req.body;
-    const filter    = month
-      ? { status: { $in: ["draft","pending"] }, month }
-      : { status: { $in: ["draft","pending"] } };
+    const filter = month
+      ? { status: { $in: ["draft", "pending"] }, month }
+      : { status: { $in: ["draft", "pending"] } };
 
     const payrolls    = await Payroll.find(filter).populate("userId", "name email role employeeId");
     let processed     = 0;
@@ -912,13 +803,13 @@ const processPayroll = async (req, res) => {
             to:           p.userId.email,
             name:         p.userId.name,
             employeeId:   p.employeeId || p.userId.employeeId || String(p.userId._id),
-            role:         p.role,         month:        p.month,
-            periodStart:  p.periodStart,  periodEnd:    p.periodEnd,
-            workingDays:  p.workingDays,  presentDays:  p.presentDays,
-            leaveDays:    p.leaveDays,    paidLeaveDays:p.paidLeaveDays,
-            basicSalary:  p.basicSalary,  earnedBasic:  p.earnedBasic,
-            grossSalary:  p.grossSalary,  netSalary:    p.netSalary,
-            status:       p.status,       paymentDate:  p.paymentDate,
+            role:         p.role,          month:         p.month,
+            periodStart:  p.periodStart,   periodEnd:     p.periodEnd,
+            workingDays:  p.workingDays,   presentDays:   p.presentDays,
+            leaveDays:    p.leaveDays,     paidLeaveDays: p.paidLeaveDays,
+            basicSalary:  p.basicSalary,   earnedBasic:   p.earnedBasic,
+            grossSalary:  p.grossSalary,   netSalary:     p.netSalary,
+            status:       p.status,        paymentDate:   p.paymentDate,
             paymentMode:  p.paymentMode,
           });
         } catch (e) { emailErrors.push({ name: p.userId.name, error: e.message }); }
@@ -944,13 +835,13 @@ const markAsPaid = async (req, res) => {
         to:           payroll.userId.email,
         name:         payroll.userId.name,
         employeeId:   payroll.employeeId || payroll.userId.employeeId || String(payroll.userId._id),
-        role:         payroll.role,         month:        payroll.month,
-        periodStart:  payroll.periodStart,  periodEnd:    payroll.periodEnd,
-        workingDays:  payroll.workingDays,  presentDays:  payroll.presentDays,
-        leaveDays:    payroll.leaveDays,    paidLeaveDays:payroll.paidLeaveDays,
-        basicSalary:  payroll.basicSalary,  earnedBasic:  payroll.earnedBasic,
-        grossSalary:  payroll.grossSalary,  netSalary:    payroll.netSalary,
-        status:       payroll.status,       paymentDate:  payroll.paymentDate,
+        role:         payroll.role,          month:         payroll.month,
+        periodStart:  payroll.periodStart,   periodEnd:     payroll.periodEnd,
+        workingDays:  payroll.workingDays,   presentDays:   payroll.presentDays,
+        leaveDays:    payroll.leaveDays,     paidLeaveDays: payroll.paidLeaveDays,
+        basicSalary:  payroll.basicSalary,   earnedBasic:   payroll.earnedBasic,
+        grossSalary:  payroll.grossSalary,   netSalary:     payroll.netSalary,
+        status:       payroll.status,        paymentDate:   payroll.paymentDate,
         paymentMode:  payroll.paymentMode,
       });
     }
@@ -969,13 +860,13 @@ const resendPayslip = async (req, res) => {
       to:           payroll.userId.email,
       name:         payroll.userId.name,
       employeeId:   payroll.employeeId || payroll.userId.employeeId || String(payroll.userId._id),
-      role:         payroll.role,         month:        payroll.month,
-      periodStart:  payroll.periodStart,  periodEnd:    payroll.periodEnd,
-      workingDays:  payroll.workingDays,  presentDays:  payroll.presentDays,
-      leaveDays:    payroll.leaveDays,    paidLeaveDays:payroll.paidLeaveDays,
-      basicSalary:  payroll.basicSalary,  earnedBasic:  payroll.earnedBasic,
-      grossSalary:  payroll.grossSalary,  netSalary:    payroll.netSalary,
-      status:       payroll.status,       paymentDate:  payroll.paymentDate,
+      role:         payroll.role,          month:         payroll.month,
+      periodStart:  payroll.periodStart,   periodEnd:     payroll.periodEnd,
+      workingDays:  payroll.workingDays,   presentDays:   payroll.presentDays,
+      leaveDays:    payroll.leaveDays,     paidLeaveDays: payroll.paidLeaveDays,
+      basicSalary:  payroll.basicSalary,   earnedBasic:   payroll.earnedBasic,
+      grossSalary:  payroll.grossSalary,   netSalary:     payroll.netSalary,
+      status:       payroll.status,        paymentDate:   payroll.paymentDate,
       paymentMode:  payroll.paymentMode,
     });
 
@@ -1008,14 +899,14 @@ const bulkGeneratePayroll = async (req, res) => {
       const { leaveDays, presentDays } = await getAttendanceData(user._id, start, end, workingDays);
       const calc = calcSalary({
         basicSalary:   user.basicSalary,
-        workingDays,   presentDays,  leaveDays,
+        workingDays,   presentDays, leaveDays,
         paidLeaveDays: Number(paidLeaveDays),
       });
       try {
         await Payroll.create({
-          userId:        user._id,       month,
-          periodStart:   start,          periodEnd:     end,
-          role:          user.role,      workingDays,
+          userId:        user._id,      month,
+          periodStart:   start,         periodEnd:     end,
+          role:          user.role,     workingDays,
           presentDays,   leaveDays,
           paidLeaveDays: Number(paidLeaveDays),
           basicSalary:   user.basicSalary,
@@ -1054,15 +945,15 @@ const backfillPayroll = async (req, res) => {
         const { leaveDays, presentDays } = await getAttendanceData(user._id, start, end, workingDays);
         const calc = calcSalary({
           basicSalary:   user.basicSalary,
-          workingDays,   presentDays,  leaveDays,
+          workingDays,   presentDays, leaveDays,
           paidLeaveDays: 1,
         });
 
         await Payroll.create({
-          userId:        user._id,       month,
-          periodStart:   start,          periodEnd:    end,
-          role:          user.role,      workingDays,
-          presentDays,   leaveDays,      paidLeaveDays: 1,
+          userId:        user._id,      month,
+          periodStart:   start,         periodEnd:    end,
+          role:          user.role,     workingDays,
+          presentDays,   leaveDays,     paidLeaveDays: 1,
           basicSalary:   user.basicSalary,
           earnedBasic:   calc.earnedBasic,
           grossSalary:   calc.grossSalary,
