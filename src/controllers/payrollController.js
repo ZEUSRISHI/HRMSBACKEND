@@ -9,7 +9,7 @@ const fs          = require("fs");
 
 /* ─── Logo path ─────────────────────────────────────────────── */
 // Save your logo PNG at: <project-root>/src/assets/quibo-logo.png
-const LOGO_PATH = path.resolve("C:/hrms2/HRMS--main/HRMS--main/src/assets/quibo-logo.png");
+const LOGO_PATH = "https://raw.githubusercontent.com/ZEUSRISHI/HRMS-/main/src/assets/quibo-logo.png";
 
 /* ─── Read logo as base64 once at startup ───────────────────── */
 let LOGO_BASE64 = "";
