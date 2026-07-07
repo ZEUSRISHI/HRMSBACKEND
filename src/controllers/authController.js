@@ -1,9 +1,12 @@
 const User = require("../models/User");
+const { OAuth2Client } = require("google-auth-library");
 const {
   generateAccessToken,
   generateRefreshToken,
   verifyRefreshToken,
 } = require("../utils/jwt");
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 /* ============================================================
    HELPER — send token response
@@ -60,7 +63,12 @@ exports.login = async (req, res) => {
     const password = req.body.password?.trim();
     const { role } = req.body;
 
-    const user = await User.findOne({ email }).select("+password");
+    // ✅ FIX: must explicitly select failedLoginAttempts & lockUntil —
+    // both are select:false in the schema, so without this the
+    // lockout logic below always operates on undefined values.
+    const user = await User.findOne({ email }).select(
+      "+password +failedLoginAttempts +lockUntil"
+    );
 
     if (!user) {
       return res.status(401).json({ success: false, message: "Invalid credentials." });
@@ -120,21 +128,58 @@ exports.login = async (req, res) => {
   }
 };
 
-// @desc    Google OAuth login (lookup by email, no password required)
+// @desc    Google OAuth login — verifies the Google ID token server-side
+//          instead of trusting a client-supplied email string.
 // @route   POST /api/auth/google-login
 // @access  Public
 exports.googleLogin = async (req, res) => {
   try {
-    const { email } = req.body;
+    // ✅ CHANGED: frontend now sends the raw Google ID token (credential),
+    // not a decoded email. See LoginPage.tsx update below.
+    const { idToken } = req.body;
 
-    if (!email) {
+    if (!idToken) {
       return res.status(400).json({
         success: false,
-        message: "Email is required.",
+        message: "Google ID token is required.",
       });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    // ✅ Verify the token against Google's servers. This confirms the
+    // token was really issued by Google for OUR client ID and hasn't
+    // been tampered with — closes the "trust whatever email is sent"
+    // security gap from the previous implementation.
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch (verifyErr) {
+      console.error("Google token verification failed:", verifyErr.message);
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired Google token.",
+      });
+    }
+
+    if (!payload || !payload.email) {
+      return res.status(401).json({
+        success: false,
+        message: "Google token did not contain a valid email.",
+      });
+    }
+
+    if (!payload.email_verified) {
+      return res.status(403).json({
+        success: false,
+        message: "Google account email is not verified.",
+      });
+    }
+
+    const email = payload.email.toLowerCase();
+    const user  = await User.findOne({ email });
 
     if (!user) {
       return res.status(404).json({
