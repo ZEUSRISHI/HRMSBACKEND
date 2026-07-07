@@ -108,6 +108,22 @@ const userSchema = new mongoose.Schema(
       type:   String,
       select: false,
     },
+
+    /* ============================================================
+       ✅ ACCOUNT LOCKOUT — brute-force / dictionary attack protection
+       Tracks consecutive failed login attempts and temporarily locks
+       the account once a threshold is hit. Used by authController.login.
+       ============================================================ */
+    failedLoginAttempts: {
+      type:    Number,
+      default: 0,
+      select:  false,
+    },
+    lockUntil: {
+      type:    Date,
+      default: null,
+      select:  false,
+    },
   },
   { timestamps: true }
 );
@@ -129,12 +145,21 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 };
 
 /* ============================================================
-   TO SAFE OBJECT  — strips password & refreshToken
+   ✅ IS LOCKED — convenience helper for controllers
+   ============================================================ */
+userSchema.methods.isLocked = function () {
+  return !!(this.lockUntil && this.lockUntil > new Date());
+};
+
+/* ============================================================
+   TO SAFE OBJECT  — strips password, refreshToken & lockout internals
    ============================================================ */
 userSchema.methods.toSafeObject = function () {
   const obj = this.toObject();
   delete obj.password;
   delete obj.refreshToken;
+  delete obj.failedLoginAttempts;
+  delete obj.lockUntil;
   return obj;
 };
 
