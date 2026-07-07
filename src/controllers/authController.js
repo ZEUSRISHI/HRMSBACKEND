@@ -66,8 +66,30 @@ exports.login = async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credentials." });
     }
 
+    // Check if account is currently locked
+    if (user.lockUntil && user.lockUntil > new Date()) {
+      const minutesLeft = Math.ceil((user.lockUntil - new Date()) / 60000);
+      return res.status(429).json({
+        success: false,
+        message: `Account locked due to too many failed attempts. Try again in ${minutesLeft} minute(s).`,
+      });
+    }
+
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+      user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+
+      if (user.failedLoginAttempts >= 5) {
+        user.lockUntil = new Date(Date.now() + 15 * 60 * 1000); // lock 15 minutes
+        user.failedLoginAttempts = 0;
+        await user.save({ validateBeforeSave: false });
+        return res.status(429).json({
+          success: false,
+          message: "Too many failed attempts. Account locked for 15 minutes.",
+        });
+      }
+
+      await user.save({ validateBeforeSave: false });
       return res.status(401).json({ success: false, message: "Invalid credentials." });
     }
 
@@ -85,6 +107,9 @@ exports.login = async (req, res) => {
       });
     }
 
+    // Reset lockout counters on successful login
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
     user.lastLogin = new Date();
     await user.save({ validateBeforeSave: false });
 
