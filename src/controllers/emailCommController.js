@@ -166,6 +166,16 @@ function buildTemplate({
 </body></html>`;
 }
 
+// ✅ Isolated logger — a logging failure must NEVER change the response
+// already sent to the client for a successful (or handled) email send.
+async function safeLogEmail(logData) {
+  try {
+    await EmailLog.create(logData);
+  } catch (e) {
+    console.error("⚠️ Failed to write EmailLog (non-fatal):", e.message);
+  }
+}
+
 exports.getDirectory = async (req, res) => {
   try {
     const users = await User.find({ isActive: true })
@@ -179,13 +189,15 @@ exports.getDirectory = async (req, res) => {
 };
 
 exports.sendEmail = async (req, res) => {
+  // ✅ By this point express-validator has already guaranteed:
+  //    - to is a non-empty array of valid email strings
+  //    - subject is a non-empty string (trimmed)
+  //    - body is a non-empty string (trimmed)
+  //    - priority (if present) is one of normal/medium/high
+  // So no more "x?.trim is not a function" or raw Mongoose cast errors are possible here.
+  const { to, cc = [], subject, body, priority = "normal" } = req.body;
+
   try {
-    const { to, cc = [], subject, body, priority = "normal" } = req.body;
-
-    if (!to?.length)      return res.status(400).json({ success: false, message: "At least one recipient required" });
-    if (!subject?.trim()) return res.status(400).json({ success: false, message: "Subject is required" });
-    if (!body?.trim())    return res.status(400).json({ success: false, message: "Message body is required" });
-
     const senderName = req.user?.name || "HRMS Admin";
     const senderRole = req.user?.role || "admin";
 
@@ -209,20 +221,23 @@ exports.sendEmail = async (req, res) => {
     }
 
     const sentCount = to.length - errors.length;
+    const allFailed = errors.length === to.length;
 
-    await EmailLog.create({
+    await safeLogEmail({
       sentBy:   req.user._id,
       type:     "direct",
       to, cc, subject, body, priority,
-      status:   errors.length === to.length ? "failed" : "sent",
+      status:   allFailed ? "failed" : "sent",
       error:    errors.length ? JSON.stringify(errors) : undefined,
     });
 
-    if (errors.length === to.length) {
-      return res.status(500).json({
+    // ✅ All recipients genuinely failed to receive mail (Brevo/delivery issue) —
+    // this is a real server-side/upstream failure, so 502 is more accurate than 500,
+    // but message stays generic (no stack traces / internal details).
+    if (allFailed) {
+      return res.status(502).json({
         success: false,
-        message: `Failed to send: ${errors[0]?.error}`,
-        errors,
+        message: "Failed to send email to any recipient. Please try again shortly.",
       });
     }
 
@@ -232,34 +247,36 @@ exports.sendEmail = async (req, res) => {
       recipientCount: sentCount,
     });
   } catch (err) {
-    console.error("Send email error:", err.message);
-    try {
-      await EmailLog.create({
-        sentBy:   req.user._id,
-        type:     "direct",
-        to:       req.body.to       || [],
-        subject:  req.body.subject  || "",
-        body:     req.body.body     || "",
-        priority: req.body.priority || "normal",
-        status:   "failed",
-        error:    err.message,
-      });
-    } catch (_) {}
-    res.status(500).json({ success: false, message: err.message || "Failed to send email" });
+    // ✅ Any unexpected internal error is logged server-side only;
+    // the client gets a generic message, never the raw error.
+    console.error("Send email error:", err);
+
+    await safeLogEmail({
+      sentBy:   req.user._id,
+      type:     "direct",
+      to:       Array.isArray(to) ? to : [],
+      subject:  typeof subject === "string" ? subject : "",
+      body:     typeof body === "string" ? body : "",
+      priority: PRIORITY_SAFE(priority),
+      status:   "failed",
+      error:    err.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "An unexpected error occurred while sending the email.",
+    });
   }
 };
 
 exports.sendToTeam = async (req, res) => {
+  const { roles, subject, body, priority = "normal" } = req.body;
+
   try {
-    const { roles, subject, body, priority = "normal" } = req.body;
-
-    if (!roles?.length)   return res.status(400).json({ success: false, message: "Select at least one role" });
-    if (!subject?.trim()) return res.status(400).json({ success: false, message: "Subject is required" });
-    if (!body?.trim())    return res.status(400).json({ success: false, message: "Message body is required" });
-
     const recipients = await User.find({ role: { $in: roles }, isActive: true }).select("name email");
-    if (!recipients.length)
+    if (!recipients.length) {
       return res.status(400).json({ success: false, message: "No active members found for selected roles" });
+    }
 
     const senderName = req.user?.name || "HRMS Admin";
     const senderRole = req.user?.role || "admin";
@@ -280,22 +297,22 @@ exports.sendToTeam = async (req, res) => {
     }
 
     const sentCount = recipients.length - errors.length;
+    const allFailed = errors.length === recipients.length;
 
-    await EmailLog.create({
+    await safeLogEmail({
       sentBy:   req.user._id,
       type:     "team",
       roles,
       to:       recipients.map((u) => u.email),
       subject, body, priority,
-      status:   errors.length === recipients.length ? "failed" : "sent",
+      status:   allFailed ? "failed" : "sent",
       error:    errors.length ? JSON.stringify(errors) : undefined,
     });
 
-    if (errors.length === recipients.length) {
-      return res.status(500).json({
+    if (allFailed) {
+      return res.status(502).json({
         success: false,
-        message: `All emails failed: ${errors[0]?.error}`,
-        errors,
+        message: "Failed to send broadcast to any team member. Please try again shortly.",
       });
     }
 
@@ -305,10 +322,31 @@ exports.sendToTeam = async (req, res) => {
       recipientCount: sentCount,
     });
   } catch (err) {
-    console.error("Send team email error:", err.message);
-    res.status(500).json({ success: false, message: err.message || "Failed to send team email" });
+    console.error("Send team email error:", err);
+
+    await safeLogEmail({
+      sentBy:   req.user._id,
+      type:     "team",
+      roles:    Array.isArray(roles) ? roles : [],
+      subject:  typeof subject === "string" ? subject : "",
+      body:     typeof body === "string" ? body : "",
+      priority: PRIORITY_SAFE(priority),
+      status:   "failed",
+      error:    err.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "An unexpected error occurred while sending the broadcast.",
+    });
   }
 };
+
+// ✅ Small helper so a broken/invalid priority never reaches EmailLog's enum validator
+// in a catch-block, which is exactly what caused the original 500 + leaked message.
+function PRIORITY_SAFE(p) {
+  return ["normal", "medium", "high"].includes(p) ? p : "normal";
+}
 
 /* ============================================================
    TEST BREVO — always returns 200, never throws 500
