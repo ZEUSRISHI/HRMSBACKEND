@@ -6,6 +6,24 @@ const morgan      = require("morgan");
 const helmet      = require("helmet");
 const rateLimit   = require("express-rate-limit");
 const slowDown    = require("express-slow-down");
+const toobusy     = require("toobusy-js");
+const noCompressionForAuth = require("./middleware/noCompressionForAuth");
+
+/* ============================================================
+   TOO-BUSY / EVENT-LOOP LAG PROTECTION
+   ============================================================ */
+toobusy.maxLag(70);
+
+function toobusyMiddleware(req, res, next) {
+  if (toobusy()) {
+    res.status(503).json({
+      success: false,
+      message: "Server is temporarily overloaded. Please try again shortly.",
+    });
+  } else {
+    next();
+  }
+}
 
 /* ============================================================
    ROUTE IMPORTS — wrapped in guards so the broken one is named
@@ -52,14 +70,17 @@ const app = express();
 app.set("trust proxy", 1);
 
 /* ============================================================
+   ✅ TOO-BUSY CHECK
+   ============================================================ */
+app.use(toobusyMiddleware);
+
+/* ============================================================
    ✅ DISABLE X-Powered-By
    ============================================================ */
 app.disable("x-powered-by");
 
 /* ============================================================
-   ✅ HELMET — explicit config so every header the security test
-   is looking for (HSTS, CSP, X-Content-Type-Options, Referrer-Policy,
-   Permissions-Policy) is guaranteed present on every API response.
+   ✅ HELMET
    ============================================================ */
 app.use(
   helmet({
@@ -102,7 +123,6 @@ app.use((req, res, next) => {
   res.writeHead = function (...args) {
     res.removeHeader("X-Powered-By");
     res.removeHeader("Server");
-    res.removeHeader("X-Render-Origin-Server");
     res.removeHeader("Via");
     return originalWriteHead.apply(res, args);
   };
@@ -135,11 +155,14 @@ app.options("*", cors(corsOptions));
 app.use(cors(corsOptions));
 
 /* ============================================================
+   ✅ BREACH MITIGATION — see middleware/noCompressionForAuth.js
+   for the important limitation noted there (edge compression on
+   Render/Vercel is outside this middleware's control).
+   ============================================================ */
+app.use(noCompressionForAuth);
+
+/* ============================================================
    BODY PARSERS
-   ✅ REDUCED from 10mb → 1mb globally. Large payloads amplify
-   the damage of a flood (more CPU/memory per request). Routes
-   that genuinely need large uploads (documents, avatars) use
-   multer directly and are unaffected by this global JSON limit.
    ============================================================ */
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
@@ -154,8 +177,6 @@ if (process.env.NODE_ENV !== "test") {
 /* ============================================================
    RATE LIMITERS
    ============================================================ */
-
-/* Strict limiter for auth endpoints (brute-force / dictionary protection) */
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -165,7 +186,6 @@ const authLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
-/* Existing 15-minute window limiter for general API traffic */
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
@@ -174,31 +194,19 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-/* ============================================================
-   ✅ NEW — SHORT-WINDOW BURST LIMITER
-   Catches rapid-fire load-test-style traffic (many requests/sec)
-   that the 15-min window wouldn't block until much later.
-   (fixes: "Denial of Service (DoS) Testing" finding)
-   ============================================================ */
 const burstLimiter = rateLimit({
-  windowMs: 1000,       // 1 second window
-  max: 10,              // max 10 requests/sec per IP
+  windowMs: 1000,
+  max: 5,
   message: { success: false, message: "Too many requests in a short period." },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-/* ============================================================
-   ✅ NEW — PROGRESSIVE SLOWDOWN
-   Adds increasing delay once a client exceeds a threshold within
-   a minute, so legitimate short bursts degrade gracefully instead
-   of immediately hard-blocking, while floods get throttled hard.
-   ============================================================ */
 const speedLimiter = slowDown({
-  windowMs: 60 * 1000,     // 1 minute
-  delayAfter: 50,          // allow 50 requests/min at full speed
-  delayMs: () => 500,      // then add 500ms delay per request past that
-  maxDelayMs: 5000,        // cap delay at 5 seconds
+  windowMs: 60 * 1000,
+  delayAfter: 30,
+  delayMs: () => 750,
+  maxDelayMs: 8000,
 });
 
 app.use("/api/auth", authLimiter);
