@@ -1,9 +1,11 @@
 process.env.TZ = "Asia/Kolkata";
 
 require("dotenv").config();
+const http      = require("http");
 const app       = require("./app");
 const connectDB = require("../config/db");
 const { startContractExpiryJob } = require("./jobs/contractExpiryJob");
+const toobusy   = require("toobusy-js");
 
 const PORT = process.env.PORT || 5000;
 
@@ -14,7 +16,29 @@ const startServer = async () => {
   try {
     await connectDB();
 
-    app.listen(PORT, () => {
+    // ✅ Use a raw http.Server instead of app.listen() directly so we
+    // can set connection-level timeouts. These protect against
+    // Slowloris-style attacks (opening many connections and sending
+    // headers/body extremely slowly to exhaust the connection pool) —
+    // something no amount of Express middleware can catch, since the
+    // request never fully arrives at the app layer.
+    const server = http.createServer(app);
+
+    // Max time to receive the complete request headers (ms)
+    server.headersTimeout = 20000; // 20s
+
+    // Max time for the whole request/response cycle (ms)
+    server.requestTimeout = 30000; // 30s
+
+    // How long an idle keep-alive socket stays open before closing
+    server.keepAliveTimeout = 15000; // 15s (must be < headersTimeout)
+
+    // Hard cap on simultaneous connections this instance will accept.
+    // Tune based on your Render plan's resources; this just prevents
+    // unbounded connection growth from a single flood.
+    server.maxConnections = 500;
+
+    server.listen(PORT, () => {
       console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
       console.log("🚀  HRMS Backend Server Started");
       console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -24,6 +48,7 @@ const startServer = async () => {
       console.log(`🔒  Trust Proxy : ✅ enabled`);
       console.log(`⏰  Timezone    : ${process.env.TZ} ✅`);
       console.log(`🌐  CORS        : ✅ https://hrmsquibotech.vercel.app`);
+      console.log(`🛡️   DoS guards  : headersTimeout=20s requestTimeout=30s maxConnections=500 toobusy-lag=70ms`);
       console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
       console.log("\n📋  ALL API ENDPOINTS");
@@ -176,6 +201,13 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+
+/* ============================================================
+   GRACEFUL SHUTDOWN — shut toobusy down cleanly with the process
+   ============================================================ */
+process.on("exit", () => {
+  toobusy.shutdown();
+});
 
 /* ============================================================
    GLOBAL ERROR HANDLING
