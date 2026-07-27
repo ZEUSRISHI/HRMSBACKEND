@@ -136,7 +136,8 @@ app.use((req, res, next) => {
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  "https://hrmsquibotech.vercel.app",
+  "https://quibohrms.app",
+  "https://www.quibohrms.app",
 ];
 
 const corsOptions = {
