@@ -31,6 +31,52 @@ const getFromName    = () => process.env.EMAIL_FROM_NAME || "Quibo Tech HRMS";
 const getAppUrl      = () => process.env.APP_URL || "https://hrmsquibotech.vercel.app";
 const getProvider    = () => process.env.BREVO_SMTP_PASS ? "brevo" : "nodemailer";
 
+
+/* ============================================================
+   BREVO REST API SENDER — used for checkout reminders since
+   BREVO_API_KEY is the confirmed-working credential on this
+   server (SMTP creds are unreliable/unset).
+   ============================================================ */
+const sendViaBrevoAPI = async ({ to, subject, html, text }) => {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) throw new Error("BREVO_API_KEY not set in environment variables.");
+
+  const fromEmail = process.env.EMAIL_FROM || "quibotechnologies@gmail.com";
+  const fromName  = getFromName();
+
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+      "api-key": apiKey,
+    },
+    body: JSON.stringify({
+      sender: { name: fromName, email: fromEmail },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+      textContent: text || html.replace(/<[^>]*>/g, ""),
+    }),
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  let data;
+  if (contentType.includes("application/json")) {
+    data = await response.json();
+  } else {
+    const raw = await response.text();
+    throw new Error(`Brevo non-JSON response (HTTP ${response.status}): ${raw.slice(0, 200)}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(data.message || data.code || `Brevo HTTP ${response.status}`);
+  }
+
+  console.log(`✅ Brevo API sent to ${to} | messageId: ${data.messageId}`);
+  return data;
+};
+
 try {
   const t = getTransport();
   t.verify((err) => {
@@ -156,6 +202,24 @@ const sendPayslipEmail = async ({ to, name, month, year }) => {
     });
   } catch (err) { console.error("Payslip email failed:", err.message); }
 };
+const sendCheckoutReminderEmail = async ({ to, name, checkInTime }) => {
+  const appUrl = getAppUrl();
+  const html = `<div style="font-family:Arial,sans-serif;padding:32px;max-width:520px;margin:0 auto">
+    <h2 style="color:#d97706">Forgot to check out?</h2>
+    <p>Hi ${name},</p>
+    <p>You checked in at <strong>${checkInTime}</strong> and it's been over 8 hours. If your work day is done, please remember to check out.</p>
+    <a href="${appUrl}/attendance" style="background:#d97706;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block;margin-top:16px">Check Out Now</a>
+  </div>`;
+
+  // ✅ No try/catch here — let errors propagate to the caller
+  // (job + controller) so a failed send is never reported as success.
+  return await sendViaBrevoAPI({
+    to,
+    subject: `⏰ Reminder: You're still checked in — Quibo Tech HRMS`,
+    html,
+    text: `Hi ${name}, you checked in at ${checkInTime} and it's been over 8 hours. Please remember to check out: ${appUrl}/attendance`,
+  });
+};
 
 const sendAttendanceAlertEmail = async ({ to, name, date, alertType }) => {
   const appUrl = getAppUrl();
@@ -189,4 +253,5 @@ module.exports = {
   sendPayslipEmail,
   sendAttendanceAlertEmail,
   sendPasswordResetEmail,
+  sendCheckoutReminderEmail,   // ← add this
 };
