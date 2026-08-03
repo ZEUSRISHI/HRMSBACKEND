@@ -161,8 +161,28 @@ const getMyConversations = async (req, res) => {
       })
       .sort({ lastMessageAt: -1 });
 
-    console.log(`✅ getMyConversations: ${conversations.length} convs for ${myId}`);
-    res.status(200).json({ success: true, conversations });
+    // ✅ attach unread count per conversation
+    const convIds = conversations.map((c) => c._id);
+    const unreadAgg = await Message.aggregate([
+      {
+        $match: {
+          conversationId: { $in: convIds },
+          senderId: { $ne: myId },
+          isDeleted: false,
+          "readBy.userId": { $ne: myId },
+        },
+      },
+      { $group: { _id: "$conversationId", count: { $sum: 1 } } },
+    ]);
+    const unreadMap = {};
+    unreadAgg.forEach((u) => (unreadMap[u._id.toString()] = u.count));
+
+    const withUnread = conversations.map((c) => ({
+      ...c.toObject(),
+      unreadCount: unreadMap[c._id.toString()] || 0,
+    }));
+
+    res.status(200).json({ success: true, conversations: withUnread });
   } catch (err) {
     console.error("❌ getMyConversations error:", err.message);
     res.status(500).json({ success: false, message: err.message });
