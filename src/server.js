@@ -6,7 +6,7 @@ const app       = require("./app");
 const connectDB = require("../config/db");
 const { startContractExpiryJob } = require("./jobs/contractExpiryJob");
 const toobusy   = require("toobusy-js");
-
+const { startCheckoutReminderJob } = require("./jobs/checkoutReminderJob");
 const PORT = process.env.PORT || 5000;
 
 /* ============================================================
