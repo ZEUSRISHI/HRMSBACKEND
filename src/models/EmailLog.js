@@ -19,3 +19,4 @@ emailLogSchema.index({ status: 1 });
 
 module.exports = mongoose.model("EmailLog", emailLogSchema);
 
+
