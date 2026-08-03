@@ -8,6 +8,7 @@ const rateLimit   = require("express-rate-limit");
 const slowDown    = require("express-slow-down");
 const toobusy     = require("toobusy-js");
 const noCompressionForAuth = require("./middleware/noCompressionForAuth");
+const { startCheckoutReminderJob } = require("./jobs/checkoutReminderJob");
 
 /* ============================================================
    TOO-BUSY / EVENT-LOOP LAG PROTECTION
@@ -189,7 +190,7 @@ const authLimiter = rateLimit({
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: process.env.NODE_ENV === "production" ? 400 : 2000, // ← raised from 200
   message: { success: false, message: "Too many requests. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -197,7 +198,7 @@ const apiLimiter = rateLimit({
 
 const burstLimiter = rateLimit({
   windowMs: 1000,
-  max: 5,
+  max: process.env.NODE_ENV === "production" ? 15 : 100,
   message: { success: false, message: "Too many requests in a short period." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -325,5 +326,12 @@ app.use((err, req, res, next) => {
     message: err.message || "Internal Server Error",
   });
 });
+
+/* ============================================================
+   START BACKGROUND JOBS
+   ============================================================ */
+if (process.env.NODE_ENV !== "test") {
+  startCheckoutReminderJob();
+}
 
 module.exports = app;
