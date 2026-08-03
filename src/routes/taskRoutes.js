@@ -12,9 +12,9 @@ router.get("/my",           taskController.getMyTasks);
 
 router.post("/manual",      authorize("admin"), taskController.createManualTask);
 router.post("/manual/bulk", authorize("admin"), taskController.bulkManualTasks);
-router.post("/",            authorize("admin", "manager", "hr"), taskController.createTask);
+router.post("/",            authorize("manager", "hr"), taskController.createTask); // ⛔ admin removed — admin views only, doesn't assign
 
-router.put("/:id",          taskController.updateTask);
+router.put("/:id",          taskController.updateTask); // now also used for employee self-edit on their own assigned task
 router.delete("/:id",       authorize("admin", "manager", "hr"), taskController.deleteTask);
 router.post("/:id/update",  taskController.addTaskUpdate);
 
