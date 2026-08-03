@@ -24,6 +24,26 @@ const attendanceSchema = new mongoose.Schema(
       trim:      true,
     },
 
+    checkInLocation: {
+  type: String,
+  default: null,
+},
+checkInCoords: {
+  lat: { type: Number, default: null },
+  lng: { type: Number, default: null },
+},
+checkOutLocation: {
+  type: String,
+  default: null,
+},
+checkOutCoords: {
+  lat: { type: Number, default: null },
+  lng: { type: Number, default: null },
+},
+checkoutReminderSent: {
+  type: Boolean,
+  default: false,
+},
     /* ── Manual entry fields (admin only) ── */
     isManual:           { type: Boolean, default: false },
     manualEmployeeName: { type: String },
