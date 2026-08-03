@@ -15,9 +15,12 @@ router.get("/users-list", authorize("admin", "hr"), ctrl.getAllUsersList);
 router.post("/admin-checkin/:userId", authorize("admin", "hr"), ctrl.adminCheckInForUser);
 router.post("/admin-checkout/:userId", authorize("admin", "hr"), ctrl.adminCheckOutForUser);
 
+router.post("/admin-checkout/:userId", authorize("admin", "hr"), ctrl.adminCheckOutForUser);
+router.post("/send-reminder/:userId", authorize("admin", "hr"), ctrl.sendManualCheckoutReminder); // ← add this
+
 router.get("/today-all", authorize("admin", "hr", "manager"), ctrl.getTodayAll);
 router.get("/all", authorize("admin", "hr", "manager"), ctrl.getAllAttendance);
-
+router.get("/manual/my", ctrl.getMyManualAttendance);   // ← add this line
 router.post("/manual", authorize("admin"), ctrl.addManualAttendance);
 router.get("/manual", authorize("admin"), ctrl.getManualAttendance);
 router.delete("/manual/:id", authorize("admin"), ctrl.deleteManualAttendance);
