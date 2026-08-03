@@ -1,25 +1,17 @@
 const Task = require("../models/Task");
-const User = require("../models/User"); // same User model used by userController.js / User Management
+const User = require("../models/User");
 
-// ✅ This is the single source of truth for who each role can assign to.
-// Admin → manager, hr, employee (everyone below admin)
-// Manager → hr, employee
-// HR → employee
 const allowedRoles = {
-  admin:   ["manager", "hr", "employee"],
+  admin:   ["manager"],
   manager: ["hr", "employee"],
   hr:      ["employee"],
 };
 
-// Powers the "Assign To" dropdown. Since it queries the same User
-// collection that User Management writes to, any user created/edited
-// there (with the correct role) shows up here immediately.
 const getAssignableUsers = async (req, res) => {
   try {
     const roles = allowedRoles[req.user.role];
     if (!roles) return res.status(403).json({ success: false, message: "Not authorized." });
-    const users = await User.find({ role: { $in: roles }, isActive: true })
-      .select("name email role");
+    const users = await User.find({ role: { $in: roles } }).select("name email role");
     res.status(200).json({ success: true, users });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -28,7 +20,7 @@ const getAssignableUsers = async (req, res) => {
 
 const createTask = async (req, res) => {
   try {
-    const { assignedTo, title, dueDate } = req.body;
+    const { assignedTo } = req.body;
     const roles = allowedRoles[req.user.role];
 
     if (assignedTo) {
@@ -42,40 +34,13 @@ const createTask = async (req, res) => {
         });
     }
 
-    // Duplicate-submission guard — same title/assignee/dueDate by the
-    // same creator within 5 seconds returns the existing task instead
-    // of creating a second one.
-    const fiveSecondsAgo = new Date(Date.now() - 5000);
-    const recentDuplicate = await Task.findOne({
-      title,
-      assignedTo: assignedTo || null,
-      assignedBy: req.user._id,
-      dueDate: dueDate || "",
-      createdAt: { $gte: fiveSecondsAgo },
-    });
-
-    if (recentDuplicate) {
-      const populated = await Task.findById(recentDuplicate._id)
-        .populate("assignedTo", "name email role")
-        .populate("assignedBy", "name email role");
-      return res.status(200).json({
-        success: true,
-        task: populated,
-        note: "Duplicate submission detected — returned existing task instead of creating a new one.",
-      });
-    }
-
     const task = await Task.create({
       ...req.body,
       assignedTo: assignedTo || null,
       assignedBy: req.user._id,
     });
 
-    const populated = await Task.findById(task._id)
-      .populate("assignedTo", "name email role")
-      .populate("assignedBy", "name email role");
-
-    res.status(201).json({ success: true, task: populated });
+    res.status(201).json({ success: true, task });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -103,26 +68,6 @@ const createManualTask = async (req, res) => {
       const u = await User.findById(assignedBy);
       if (!u) return res.status(400).json({ success: false, message: "assignedBy user not found." });
       assignedById = u._id;
-    }
-
-    const fiveSecondsAgo = new Date(Date.now() - 5000);
-    const recentDuplicate = await Task.findOne({
-      title,
-      assignedTo: assignedToId,
-      assignedBy: assignedById,
-      dueDate: dueDate || "",
-      createdAt: { $gte: fiveSecondsAgo },
-    });
-
-    if (recentDuplicate) {
-      const populated = await Task.findById(recentDuplicate._id)
-        .populate("assignedTo", "name email role")
-        .populate("assignedBy", "name email role");
-      return res.status(200).json({
-        success: true,
-        task: populated,
-        note: "Duplicate submission detected — returned existing task instead of creating a new one.",
-      });
     }
 
     const taskData = {
@@ -203,7 +148,6 @@ const bulkManualTasks = async (req, res) => {
   }
 };
 
-// Admin-only — global "see every task" view.
 const getAllTasks = async (req, res) => {
   try {
     const { status, priority, assignedTo, startDate, endDate, range } = req.query;
@@ -247,7 +191,6 @@ const getAllTasks = async (req, res) => {
   }
 };
 
-// Manager / HR / Employee — own created/assigned tasks, full CRUD scope.
 const getMyTasks = async (req, res) => {
   try {
     const tasks = await Task.find({
@@ -265,10 +208,33 @@ const getMyTasks = async (req, res) => {
 
 const updateTask = async (req, res) => {
   try {
-    const task = await Task.findByIdAndUpdate(req.params.id, req.body, { new: true })
+    const task = await Task.findById(req.params.id);
+    if (!task) return res.status(404).json({ success: false, message: "Task not found." });
+
+    const isAdmin        = req.user.role === "admin";
+    const isAssignedByMe = task.assignedBy?.toString() === req.user._id.toString();
+    const isAssignedToMe = task.assignedTo?.toString() === req.user._id.toString();
+
+    if (!isAdmin && !isAssignedByMe && !isAssignedToMe) {
+      return res.status(403).json({ success: false, message: "Not authorized to edit this task." });
+    }
+
+    // Employees who only have the task assigned to them (not admin/creator)
+    // may only edit status + append a self-update note/hours — not reassign,
+    // retitle, or change priority/due date on someone else's task definition.
+    let allowedUpdates = req.body;
+    if (isAssignedToMe && !isAdmin && !isAssignedByMe) {
+      const { status, description } = req.body;
+      allowedUpdates = {};
+      if (status !== undefined)      allowedUpdates.status      = status;
+      if (description !== undefined) allowedUpdates.description = description;
+    }
+
+    const updated = await Task.findByIdAndUpdate(req.params.id, allowedUpdates, { new: true })
       .populate("assignedTo", "name email role")
       .populate("assignedBy", "name email role");
-    res.status(200).json({ success: true, task });
+
+    res.status(200).json({ success: true, task: updated });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -276,18 +242,6 @@ const updateTask = async (req, res) => {
 
 const deleteTask = async (req, res) => {
   try {
-    const task = await Task.findById(req.params.id);
-    if (!task) return res.status(404).json({ success: false, message: "Task not found." });
-
-    const isOwner = task.assignedBy?.toString() === req.user._id.toString();
-
-    if (req.user.role !== "admin" && !isOwner) {
-      return res.status(403).json({
-        success: false,
-        message: "You can only delete tasks you created.",
-      });
-    }
-
     await Task.findByIdAndDelete(req.params.id);
     res.status(200).json({ success: true, message: "Task deleted." });
   } catch (err) {
