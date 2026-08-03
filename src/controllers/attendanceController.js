@@ -57,6 +57,36 @@ const eachDay = (startStr, endStr) => {
 };
 
 /* ============================================================
+   REVERSE GEOCODE — OpenStreetMap Nominatim
+   ============================================================ */
+const reverseGeocode = async (lat, lng) => {
+  try {
+    if (lat == null || lng == null) return null;
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "QuiboTechHRMS/1.0 (attendance@quibotech.com)" },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+
+    const a = data.address || {};
+    const parts = [
+      a.building || a.amenity || a.office || a.shop,
+      a.road,
+      a.suburb || a.neighbourhood,
+      a.city || a.town || a.village,
+    ].filter(Boolean);
+
+    const pincode = a.postcode ? ` - ${a.postcode}` : "";
+    const label = parts.length ? `${parts.join(", ")}${pincode}` : data.display_name || null;
+    return label;
+  } catch (err) {
+    console.error("reverseGeocode error:", err.message);
+    return null;
+  }
+};
+
+/* ============================================================
    CHECK IN — Manual only, user must click the button
    Supports Employee, HR, Admin, Manager
    Accepts optional { tagline } in request body — stored to MongoDB
@@ -67,6 +97,7 @@ const checkIn = async (req, res) => {
     const today   = todayStr();
     const timeNow = nowTimeStr();
     const tagline = (req.body?.tagline ?? "").toString().trim().slice(0, 200);
+    const { lat, lng } = req.body || {};
 
     const existing = await Attendance.findOne({
       userId:   req.user._id,
@@ -82,6 +113,8 @@ const checkIn = async (req, res) => {
       });
     }
 
+    const locationLabel = await reverseGeocode(lat, lng);
+
     const record = await Attendance.create({
       userId:   req.user._id,
       date:     today,
@@ -89,13 +122,16 @@ const checkIn = async (req, res) => {
       tagline:  tagline || undefined,
       status:   "present",
       isManual: false,
+      checkInLocation: locationLabel || undefined,
+      checkInCoords: (lat != null && lng != null) ? { lat, lng } : undefined,
     });
 
     await record.populate("userId", "name email role");
 
     console.log(
       `✅ CheckIn → user: ${req.user.name} (${req.user.role}) | date: ${today} | time: ${timeNow}` +
-      (tagline ? ` | tagline: "${tagline}"` : "")
+      (tagline ? ` | tagline: "${tagline}"` : "") +
+      (locationLabel ? ` | location: "${locationLabel}"` : "")
     );
 
     res.status(201).json({
@@ -129,10 +165,17 @@ const checkOut = async (req, res) => {
   try {
     const today   = todayStr();
     const timeNow = nowTimeStr();
+    const { lat, lng } = req.body || {};
+
+    const locationLabel = await reverseGeocode(lat, lng);
+
+    const updateData = { checkOut: timeNow, checkoutReminderSent: false };
+    if (locationLabel) updateData.checkOutLocation = locationLabel;
+    if (lat != null && lng != null) updateData.checkOutCoords = { lat, lng };
 
     const record = await Attendance.findOneAndUpdate(
       { userId: req.user._id, date: today, isManual: false },
-      { checkOut: timeNow },
+      updateData,
       { new: true }
     ).populate("userId", "name email role");
 
@@ -143,7 +186,10 @@ const checkOut = async (req, res) => {
       });
     }
 
-    console.log(`✅ CheckOut → user: ${req.user.name} (${req.user.role}) | date: ${today} | time: ${timeNow}`);
+    console.log(
+      `✅ CheckOut → user: ${req.user.name} (${req.user.role}) | date: ${today} | time: ${timeNow}` +
+      (locationLabel ? ` | location: "${locationLabel}"` : "")
+    );
 
     res.status(200).json({
       success: true,
@@ -235,7 +281,7 @@ const adminCheckOutForUser = async (req, res) => {
 
     const record = await Attendance.findOneAndUpdate(
       { userId: targetUser._id, date: today, isManual: false },
-      { checkOut: timeNow },
+      { checkOut: timeNow, checkoutReminderSent: false },
       { new: true }
     ).populate("userId", "name email role");
 
@@ -364,7 +410,7 @@ const addManualAttendance = async (req, res) => {
       checkIn,
       checkOut,
       tagline,
-      userId,        // ← ADDED
+      userId,
     } = req.body;
 
     if (!employeeName || !employeeRole || !startDate || !endDate || !checkIn) {
@@ -375,11 +421,11 @@ const addManualAttendance = async (req, res) => {
     }
 
     if (startDate > endDate) {
-  return res.status(400).json({
-    success: false,
-    message: "startDate cannot be after endDate.",
-  });
-}
+      return res.status(400).json({
+        success: false,
+        message: "startDate cannot be after endDate.",
+      });
+    }
 
     const checkInFormatted  = to12Hour(checkIn);
     const checkOutFormatted = checkOut ? to12Hour(checkOut) : null;
@@ -390,7 +436,7 @@ const addManualAttendance = async (req, res) => {
     const records = await Attendance.insertMany(
       days.map((date) => ({
         date,
-        userId:             userId || undefined,   // ← ADDED
+        userId:             userId || undefined,
         checkIn:            checkInFormatted,
         checkOut:           checkOutFormatted,
         tagline:            taglineTrimmed,
@@ -428,7 +474,7 @@ const getManualAttendance = async (req, res) => {
   try {
     const records = await Attendance.find({ isManual: true })
       .populate("enteredBy", "name")
-      .populate("userId",    "name role")   // ← populate userId so frontend gets name/role
+      .populate("userId",    "name role")
       .sort({ date: -1 });
     res.status(200).json({ success: true, total: records.length, records });
   } catch (err) {
@@ -466,6 +512,99 @@ const deleteManualAttendance = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+/* ============================================================
+   ADMIN / HR — MANUALLY SEND CHECKOUT REMINDER TO A USER
+   POST /api/attendance/send-reminder/:userId
+   ============================================================ */
+const sendManualCheckoutReminder = async (req, res) => {
+  try {
+    const { sendCheckoutReminderEmail } = require("../services/emailService");
+    const today = todayStr();
+
+    const targetUser = await User.findById(req.params.userId).select("name email role");
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    const record = await Attendance.findOne({
+      userId:   targetUser._id,
+      date:     today,
+      isManual: false,
+      checkIn:  { $ne: null },
+      checkOut: null,
+    });
+
+    if (!record) {
+      return res.status(400).json({
+        success: false,
+        message: `${targetUser.name} has already checked out or hasn't checked in today.`,
+      });
+    }
+
+    if (!targetUser.email) {
+      return res.status(400).json({ success: false, message: "User has no email on file." });
+    }
+
+    try {
+      await sendCheckoutReminderEmail({
+        to:          targetUser.email,
+        name:        targetUser.name,
+        checkInTime: record.checkIn,
+      });
+    } catch (emailErr) {
+      console.error(`❌ Reminder email failed for ${targetUser.email}:`, emailErr.message);
+      return res.status(502).json({
+        success: false,
+        message: `Failed to send reminder email: ${emailErr.message}`,
+      });
+    }
+
+    record.checkoutReminderSent = true;
+    await record.save();
+
+    console.log(
+      `📧 Manual checkout reminder sent → ${targetUser.name} (${targetUser.email}) | by: ${req.user.name}`
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Reminder email sent to ${targetUser.name}`,
+    });
+  } catch (err) {
+    console.error("sendManualCheckoutReminder error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
+   GET MY MANUAL ATTENDANCE — any authenticated user
+   Returns only manual records tied to the logged-in user's userId
+   GET /api/attendance/manual/my
+   ============================================================ */
+const getMyManualAttendance = async (req, res) => {
+  try {
+    const escapedName = req.user.name.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    console.log("🔍 getMyManualAttendance called by:", req.user._id, req.user.name);
+    const records = await Attendance.find({
+      isManual: true,
+      $or: [
+        { userId: req.user._id },
+        {
+          userId: { $in: [null, undefined] },
+          manualEmployeeName: { $regex: `^\\s*${escapedName}\\s*$`, $options: "i" },
+        },
+      ],
+    })
+      .populate("enteredBy", "name")
+      .populate("userId",    "name role")
+      .sort({ date: -1 });
+    console.log("🔍 Found records:", records.length, records.map(r => ({ date: r.date, name: r.manualEmployeeName, userId: r.userId })));
+    res.status(200).json({ success: true, total: records.length, records });
+  } catch (err) {
+    console.error("getMyManualAttendance error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 module.exports = {
   checkIn,
@@ -479,5 +618,7 @@ module.exports = {
   getAllAttendance,
   addManualAttendance,
   getManualAttendance,
+  getMyManualAttendance,
   deleteManualAttendance,
+  sendManualCheckoutReminder, 
 };
