@@ -97,6 +97,43 @@ const userSchema = new mongoose.Schema(
       default: "",
     },
 
+    /* ── Extended profile fields (People Hub) ── */
+    employeeCode:     { type: String, default: "" },
+    employmentType:   { type: String, default: "Full-time" },
+    workMode:         { type: String, default: "" },
+    reportingManager: { type: String, default: "" },
+    workLocation:     { type: String, default: "" },
+
+    preferredName:    { type: String, trim: true, default: "" },
+    bloodGroup:        { type: String, default: "" },
+    maritalStatus:     { type: String, default: "" },
+    nationality:        { type: String, default: "" },
+    languagesKnown:     { type: String, default: "" },
+
+    bankName:        { type: String, default: "" },
+    accountNumber:   { type: String, default: "" },
+    ifscCode:        { type: String, default: "" },
+    accountType:     { type: String, default: "" },
+
+    panNumber: { type: String, default: "" },
+    uanNumber: { type: String, default: "" },
+    pfNumber:  { type: String, default: "" },
+    taxRegime: { type: String, default: "New Regime" },
+
+    /* ── Document Center ── */
+    documents: {
+      type: [
+        {
+          name:       { type: String, required: true },
+          category:   { type: String, enum: ["employee", "identity", "tax"], required: true },
+          fileData:   { type: String, required: true }, // base64
+          fileType:   { type: String, default: "" },     // mime type
+          uploadedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
+
     /* ── Status ── */
     isActive: {
       type:    Boolean,
