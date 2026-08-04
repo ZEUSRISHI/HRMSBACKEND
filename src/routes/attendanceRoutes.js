@@ -8,6 +8,7 @@ router.use(protect);
 
 router.post("/checkin", ctrl.checkIn);
 router.post("/checkout", ctrl.checkOut);
+router.patch("/update-location", ctrl.updateTodayLocation);
 router.get("/today", ctrl.getTodayAttendance);
 router.get("/my", ctrl.getMyAttendance);
 
