@@ -57,9 +57,46 @@ const eachDay = (startStr, endStr) => {
 };
 
 /* ============================================================
-   REVERSE GEOCODE — BigDataCloud free tier (no API key needed)
-   Falls back to Nominatim if BigDataCloud fails.
+   REVERSE GEOCODE — OpenCage (building/premise, road, area,
+   district, pincode). Falls back to BigDataCloud → Nominatim.
    ============================================================ */
+const reverseGeocodeOpenCage = async (lat, lng) => {
+  const key = process.env.OPENCAGE_API_KEY;
+  if (!key) {
+    console.warn("⚠️ OPENCAGE_API_KEY not set — skipping OpenCage geocode");
+    return null;
+  }
+  const url = `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lng}&key=${key}&no_annotations=1&language=en`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+
+    if (!data.results?.length) return null;
+
+    const best = data.results[0];
+    const c = best.components || {};
+
+    const parts = [
+      c.building || c.house_name || c.office || c.shop || c.amenity,
+      [c.house_number, c.road].filter(Boolean).join(" ") || c.road,
+      c.suburb || c.neighbourhood || c.residential,
+      c.city_district || c.city || c.town || c.village,
+    ].filter(Boolean);
+
+    const pincode = c.postcode ? ` - ${c.postcode}` : "";
+    const label = parts.length ? `${parts.join(", ")}${pincode}` : best.formatted || null;
+    return label;
+  } catch (err) {
+    clearTimeout(timeout);
+    console.error("OpenCage reverseGeocode error:", err.message);
+    return null;
+  }
+};
+
 const reverseGeocodeBigDataCloud = async (lat, lng) => {
   const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`;
   const controller = new AbortController();
@@ -120,8 +157,11 @@ const reverseGeocodeNominatim = async (lat, lng) => {
 const reverseGeocode = async (lat, lng) => {
   if (lat == null || lng == null) return null;
   try {
-    const primary = await reverseGeocodeBigDataCloud(lat, lng);
-    if (primary) return primary;
+    const opencage = await reverseGeocodeOpenCage(lat, lng);
+    if (opencage) return opencage;
+    console.warn("⚠️ OpenCage returned nothing, falling back to BigDataCloud");
+    const bdc = await reverseGeocodeBigDataCloud(lat, lng);
+    if (bdc) return bdc;
     console.warn("⚠️ BigDataCloud returned nothing, falling back to Nominatim");
     return await reverseGeocodeNominatim(lat, lng);
   } catch (err) {
@@ -242,6 +282,55 @@ const checkOut = async (req, res) => {
     });
   } catch (err) {
     console.error("checkOut error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
+   UPDATE TODAY'S LOCATION — retry when geolocation was denied
+   at the moment of check-in/check-out, then granted afterward
+   PATCH /api/attendance/update-location
+   Body: { lat, lng, type: "checkin" | "checkout" }
+   ============================================================ */
+const updateTodayLocation = async (req, res) => {
+  try {
+    const today = todayStr();
+    const { lat, lng, type } = req.body || {};
+
+    if (lat == null || lng == null) {
+      return res.status(400).json({ success: false, message: "lat and lng are required." });
+    }
+    if (type !== "checkin" && type !== "checkout") {
+      return res.status(400).json({ success: false, message: "type must be 'checkin' or 'checkout'." });
+    }
+
+    const locationLabel = await reverseGeocode(lat, lng);
+    if (!locationLabel) {
+      return res.status(200).json({ success: false, message: "Could not resolve an address for that location." });
+    }
+
+    const update = type === "checkout"
+      ? { checkOutLocation: locationLabel, checkOutCoords: { lat, lng } }
+      : { checkInLocation: locationLabel, checkInCoords: { lat, lng } };
+
+    const record = await Attendance.findOneAndUpdate(
+      { userId: req.user._id, date: today, isManual: false },
+      update,
+      { new: true }
+    ).populate("userId", "name email role");
+
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: "No attendance record found for today — check in first.",
+      });
+    }
+
+    console.log(`📍 Location backfilled → user: ${req.user.name} | type: ${type} | "${locationLabel}"`);
+
+    res.status(200).json({ success: true, message: "Location updated", record });
+  } catch (err) {
+    console.error("updateTodayLocation error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -653,6 +742,7 @@ const getMyManualAttendance = async (req, res) => {
 module.exports = {
   checkIn,
   checkOut,
+  updateTodayLocation,
   adminCheckInForUser,
   adminCheckOutForUser,
   getAllUsersList,
