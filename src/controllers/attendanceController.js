@@ -57,15 +57,45 @@ const eachDay = (startStr, endStr) => {
 };
 
 /* ============================================================
-   REVERSE GEOCODE — OpenStreetMap Nominatim
+   REVERSE GEOCODE — BigDataCloud free tier (no API key needed)
+   Falls back to Nominatim if BigDataCloud fails.
    ============================================================ */
-const reverseGeocode = async (lat, lng) => {
+const reverseGeocodeBigDataCloud = async (lat, lng) => {
+  const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    if (lat == null || lng == null) return null;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+
+    const parts = [
+      data.locality,
+      data.city,
+      data.principalSubdivision,
+    ].filter(Boolean);
+
+    const pincode = data.postcode ? ` - ${data.postcode}` : "";
+    const label = parts.length ? `${parts.join(", ")}${pincode}` : null;
+    return label;
+  } catch (err) {
+    clearTimeout(timeout);
+    console.error("BigDataCloud reverseGeocode error:", err.message);
+    return null;
+  }
+};
+
+const reverseGeocodeNominatim = async (lat, lng) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
     const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
     const res = await fetch(url, {
       headers: { "User-Agent": "QuiboTechHRMS/1.0 (attendance@quibotech.com)" },
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
     if (!res.ok) return null;
     const data = await res.json();
 
@@ -81,7 +111,21 @@ const reverseGeocode = async (lat, lng) => {
     const label = parts.length ? `${parts.join(", ")}${pincode}` : data.display_name || null;
     return label;
   } catch (err) {
-    console.error("reverseGeocode error:", err.message);
+    clearTimeout(timeout);
+    console.error("Nominatim reverseGeocode error:", err.message);
+    return null;
+  }
+};
+
+const reverseGeocode = async (lat, lng) => {
+  if (lat == null || lng == null) return null;
+  try {
+    const primary = await reverseGeocodeBigDataCloud(lat, lng);
+    if (primary) return primary;
+    console.warn("⚠️ BigDataCloud returned nothing, falling back to Nominatim");
+    return await reverseGeocodeNominatim(lat, lng);
+  } catch (err) {
+    console.error("reverseGeocode combined error:", err.message);
     return null;
   }
 };
