@@ -20,4 +20,7 @@ router.get("/",    profileController.getProfile);
 router.put("/",    updateProfileRules, validate, profileController.updateProfile);
 router.delete("/", profileController.deleteAccount);
 
+router.post("/documents",           profileController.uploadDocument);
+router.delete("/documents/:docId",  profileController.deleteDocument);
+
 module.exports = router;
