@@ -17,6 +17,7 @@ router.post("/admin-checkin/:userId", authorize("admin", "hr"), ctrl.adminCheckI
 router.post("/admin-checkout/:userId", authorize("admin", "hr"), ctrl.adminCheckOutForUser);
 
 router.post("/admin-checkout/:userId", authorize("admin", "hr"), ctrl.adminCheckOutForUser);
+router.patch("/admin-checkout-date/:userId", authorize("admin", "hr"), ctrl.adminCheckOutForUserOnDate);
 router.post("/send-reminder/:userId", authorize("admin", "hr"), ctrl.sendManualCheckoutReminder); // ← add this
 
 router.get("/today-all", authorize("admin", "hr", "manager"), ctrl.getTodayAll);
