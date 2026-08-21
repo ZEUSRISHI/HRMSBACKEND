@@ -441,6 +441,77 @@ const adminCheckOutForUser = async (req, res) => {
 };
 
 /* ============================================================
+   ADMIN / HR — CHECK OUT FOR A SPECIFIC USER ON A SPECIFIC DATE
+   Works for today AND any past date where a check-in exists
+   without a check-out (manual or real).
+   PATCH /api/attendance/admin-checkout-date/:userId
+   Body: { date, checkOutTime? }  // checkOutTime "HH:MM" 24h, optional
+   ============================================================ */
+const adminCheckOutForUserOnDate = async (req, res) => {
+  try {
+    const { date, checkOutTime } = req.body || {};
+    if (!date) {
+      return res.status(400).json({ success: false, message: "date is required." });
+    }
+
+    const targetUser = await User.findById(req.params.userId).select("name email role");
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    const isToday = date === todayStr();
+    const checkOutFormatted = checkOutTime
+      ? to12Hour(checkOutTime)
+      : (isToday ? nowTimeStr() : null);
+
+    if (!checkOutFormatted) {
+      return res.status(400).json({
+        success: false,
+        message: "checkOutTime is required for a past date.",
+      });
+    }
+
+    // Prefer the real (non-manual) record for that date; fall back to a manual one tied to this user
+    let record = await Attendance.findOne({ userId: targetUser._id, date, isManual: false });
+    if (!record) {
+      record = await Attendance.findOne({ userId: targetUser._id, date, isManual: true });
+    }
+
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: `${targetUser.name} has no check-in on ${date}.`,
+      });
+    }
+
+    if (record.checkOut) {
+      return res.status(400).json({
+        success: false,
+        message: `${targetUser.name} is already checked out on ${date}.`,
+      });
+    }
+
+    record.checkOut = checkOutFormatted;
+    record.checkoutReminderSent = false;
+    await record.save();
+    await record.populate("userId", "name email role");
+
+    console.log(
+      `✅ AdminCheckOut(date) → target: ${targetUser.name} | date: ${date} | time: ${checkOutFormatted} | by: ${req.user.name}`
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Checked out ${targetUser.name} on ${date} at ${checkOutFormatted}`,
+      record,
+    });
+  } catch (err) {
+    console.error("adminCheckOutForUserOnDate error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ============================================================
    GET TODAY ATTENDANCE — current logged-in user
    GET /api/attendance/today
    ============================================================ */
@@ -566,6 +637,18 @@ const addManualAttendance = async (req, res) => {
 
     const days = eachDay(startDate, endDate);
 
+    /* ── Duplicate guard: for each requested day, remove any existing
+       record (manual OR real check-in/out) for this user so the new
+       entry replaces it instead of stacking a duplicate. ── */
+    const duplicateQuery = userId
+      ? { date: { $in: days }, userId }
+      : { date: { $in: days }, isManual: true, manualEmployeeName: employeeName.trim() };
+
+    const removed = await Attendance.deleteMany(duplicateQuery);
+    if (removed.deletedCount > 0) {
+      console.log(`♻️ Removed ${removed.deletedCount} existing record(s) before manual overwrite for ${employeeName} (${days.join(", ")})`);
+    }
+
     const records = await Attendance.insertMany(
       days.map((date) => ({
         date,
@@ -592,6 +675,7 @@ const addManualAttendance = async (req, res) => {
       success: true,
       message: `${records.length} manual attendance record(s) saved successfully.`,
       records,
+      replaced: removed.deletedCount,
     });
   } catch (err) {
     console.error("addManualAttendance error:", err);
@@ -745,6 +829,7 @@ module.exports = {
   updateTodayLocation,
   adminCheckInForUser,
   adminCheckOutForUser,
+  adminCheckOutForUserOnDate,
   getAllUsersList,
   getTodayAttendance,
   getTodayAll,
