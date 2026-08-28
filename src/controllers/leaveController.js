@@ -205,6 +205,7 @@ const addManualLeave = async (req, res) => {
   try {
     const {
       employeeName,
+      userId,
       type,
       startDate,
       endDate,
@@ -226,15 +227,6 @@ const addManualLeave = async (req, res) => {
     if (!reason || !reason.trim()) {
       return res.status(400).json({ success: false, message: "Reason is required." });
     }
-
-    // Only previous dates allowed
-    const today = new Date().toISOString().split("T")[0];
-    if (endDate >= today) {
-      return res.status(400).json({
-        success: false,
-        message: "Manual leave entry is only allowed for previous dates.",
-      });
-    }
     if (startDate > endDate) {
       return res.status(400).json({
         success: false,
@@ -248,6 +240,7 @@ const addManualLeave = async (req, res) => {
 
     const leave = await Leave.create({
       employeeName: employeeName.trim(),
+      userId:    userId || undefined,
       type,
       startDate,
       endDate,
@@ -258,8 +251,9 @@ const addManualLeave = async (req, res) => {
       source:    "manual",
       enteredBy: req.user?.name ?? "Admin",
       enteredAt: new Date(),
-      // userId intentionally omitted — manual entry has no linked User doc
     });
+
+    await leave.populate("userId", "name email role");
 
     res.status(201).json({
       success: true,
