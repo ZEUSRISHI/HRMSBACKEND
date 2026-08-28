@@ -20,7 +20,7 @@ router.get(
 // Admin only
 router.get(
   "/all",
-  authorize("admin"),
+  authorize("admin", "hr"),
   leaveController.getAllLeaves,
 );
 
