@@ -4,7 +4,7 @@ const PDFDocument = require("pdfkit");
 const path        = require("path");
 const fs          = require("fs");
 
-const LOGO_PATH = path.join(__dirname, "..", "assets", "quibo-logo.png");
+const LOGO_PATH = path.join(__dirname, "..", "assests", "quibo-logo.png");
 console.log("Looking for logo at:", LOGO_PATH);
 console.log("__dirname is:", __dirname);
 let LOGO_BASE64 = "";
