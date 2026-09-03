@@ -7,7 +7,7 @@ const PDFDocument = require("pdfkit");
 const path        = require("path");
 const fs          = require("fs");
 
-const LOGO_PATH = path.resolve("C:/hrms2/HRMS--main/HRMS--main/src/assets/quibo-logo.png");
+const LOGO_PATH = path.join(__dirname, "..", "assests", "quibo-logo.png");
 
 let LOGO_BASE64 = "";
 let LOGO_BASE64_SRC = "";
