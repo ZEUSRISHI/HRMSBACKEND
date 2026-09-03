@@ -4,7 +4,9 @@ const PDFDocument = require("pdfkit");
 const path        = require("path");
 const fs          = require("fs");
 
-const LOGO_PATH = path.resolve("C:/hrms2/HRMS--main/HRMS--main/src/assets/quibo-logo.png");
+const LOGO_PATH = path.join(__dirname, "..", "assets", "quibo-logo.png");
+console.log("Looking for logo at:", LOGO_PATH);
+console.log("__dirname is:", __dirname);
 let LOGO_BASE64 = "";
 try {
   if (fs.existsSync(LOGO_PATH)) {
@@ -57,276 +59,314 @@ async function generateInvoicePDF(invoice, client) {
     doc.on("error", reject);
 
     const pW     = 595.28;
+    const pH     = 841.89;
     const margin = 40;
     const cW     = pW - margin * 2;
 
-    const ORANGE  = "#FF6B00";
-    const DARK    = "#1a1a1a";
-    const GREY    = "#64748b";
-    const LIGHT   = "#f8fafc";
-    const BORDER  = "#e2e8f0";
-    const GREEN   = "#16a34a";
-    const RED     = "#EF4444";
+    const ORANGE = "#FF6B00";
+    const DARK   = "#1a1a1a";
+    const GREY   = "#4b5563";
+    const BORDER = "#1a1a1a";
 
-    const invDateStr = invoice.date
-      ? new Date(invoice.date).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" })
-      : "—";
-    const dueDateStr = invoice.dueDate
-      ? new Date(invoice.dueDate).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" })
-      : "—";
+    // TODO: replace with Quibo Tech's real GSTIN once available
+    const COMPANY_GSTIN   = "33AAACQ1234F1Z5";
+    const COMPANY_MOBILE  = "9159649688";
+    const COMPANY_WEBSITE = "www.quibotech.com";
 
     /* White BG */
-    doc.rect(0, 0, pW, 841.89).fill("#ffffff");
+    doc.rect(0, 0, pW, pH).fill("#ffffff");
 
-    /* Orange left stripe */
-    doc.rect(0, 0, 5, 841.89).fill(ORANGE);
+    let y = margin;
 
-    /* Logo */
-    const logoSize = 48;
-    const logoX    = margin;
-    const logoY    = 40;
-
+    /* ── HEADER: Logo + Company (left) | TAX INVOICE (right) ── */
+    const logoSize = 34;
     if (LOGO_BASE64) {
-      const logoBuf = Buffer.from(LOGO_BASE64, "base64");
-      doc.image(logoBuf, logoX, logoY, { width: logoSize, height: logoSize });
+      doc.image(Buffer.from(LOGO_BASE64, "base64"), margin, y, { width: logoSize, height: logoSize });
     } else {
       doc.save();
-      doc.roundedRect(logoX, logoY, logoSize, logoSize, 8).fill(DARK);
-      doc.fillColor(ORANGE).font("Helvetica-Bold").fontSize(26)
-         .text("Q", logoX, logoY + 11, { width: logoSize, align: "center", lineBreak: false });
+      doc.roundedRect(margin, y, logoSize, logoSize, 6).fill(DARK);
+      doc.fillColor(ORANGE).font("Helvetica-Bold").fontSize(18)
+         .text("Q", margin, y + 8, { width: logoSize, align: "center", lineBreak: false });
       doc.restore();
     }
 
-    /* Company name + address */
-    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(20)
-       .text("Quibo Tech", logoX + logoSize + 12, logoY + 5, { lineBreak: false });
-    doc.fillColor(GREY).font("Helvetica").fontSize(7.5)
-       .text("10th Floor, Millennia Business Park Campus II, Dr MGR Main Rd,",
-             logoX + logoSize + 12, logoY + 29)
-       .text("Kandhanchavadi, Perungudi, Chennai – 600096 India",
-             logoX + logoSize + 12, logoY + 40);
+    doc.fillColor(ORANGE).font("Helvetica-Bold").fontSize(17)
+       .text("Quibo Tech", margin + logoSize + 10, y + 8, { lineBreak: false });
 
-    /* INVOICE label (top-right) */
-    doc.fillColor(ORANGE).font("Helvetica-Bold").fontSize(24)
-       .text("INVOICE", pW - margin - 150, logoY + 5, { width: 150, align: "right", lineBreak: false });
-    doc.fillColor(GREY).font("Helvetica").fontSize(8.5)
-       .text(`Invoice No : ${invoice.invoiceNumber || "—"}`, pW - margin - 150, logoY + 36, { width: 150, align: "right", lineBreak: false })
-       .text(`Date       : ${invDateStr}`,                   pW - margin - 150, logoY + 49, { width: 150, align: "right", lineBreak: false });
+    doc.fillColor(ORANGE).font("Helvetica-Bold").fontSize(16)
+       .text("TAX INVOICE", pW - margin - 200, y, { width: 200, align: "right", lineBreak: false });
+    doc.fillColor(GREY).font("Helvetica").fontSize(9)
+       .text(`Invoice #: ${invoice.invoiceNumber || "—"}`, pW - margin - 200, y + 20, { width: 200, align: "right", lineBreak: false });
 
-    /* Header divider */
-    const divY = logoY + 95;
-    doc.moveTo(margin, divY).lineTo(pW - margin, divY).strokeColor(BORDER).lineWidth(0.8).stroke();
+    y += logoSize + 14;
 
-    /* ═══════════════════════════════════════════
-       BILL TO SECTION — fixed with bold GST/TIN
-       and proper address line spacing
-    ═══════════════════════════════════════════ */
-    let y = divY + 18;
-
-    doc.fillColor(GREY).font("Helvetica-Bold").fontSize(8)
-       .text("BILL TO", margin, y);
+    /* Company GSTIN + address + contacts */
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
+       .text(`GSTIN ${COMPANY_GSTIN}`, margin, y, { lineBreak: false });
     y += 13;
+    doc.fillColor(GREY).font("Helvetica").fontSize(9)
+       .text("10th Floor, Millennia Business Park Campus II, Dr MGR Main Rd,", margin, y, { lineBreak: false });
+    y += 12;
+    doc.text("Kandhanchavadi, Perungudi, Chennai, TAMIL NADU, 600096", margin, y, { lineBreak: false });
+    y += 16;
+    doc.text(`Mobile +91 ${COMPANY_MOBILE}`, margin, y, { lineBreak: false });
+    y += 12;
+    doc.text("Email business@quibotech.com", margin, y, { lineBreak: false });
+    y += 12;
+    doc.text(`Website ${COMPANY_WEBSITE}`, margin, y, { lineBreak: false });
 
-    /* Client name */
-    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(13)
+    y += 24;
+
+    /* ── BILL TO (left) | Invoice Date / Due Date / Place of Supply (right) ── */
+    const billToTop  = y;
+    const rightColX  = margin + 300;
+
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(10)
+       .text("Bill To:", margin, y, { lineBreak: false });
+    y += 15;
+    doc.font("Helvetica-Bold").fontSize(10)
        .text(client.name || "—", margin, y, { lineBreak: false });
-    y += 18;
+    y += 14;
 
-    /* Company */
-    if (client.company) {
-      doc.fillColor(GREY).font("Helvetica").fontSize(9)
-         .text(client.company, margin, y, { lineBreak: false });
-      y += 13;
-    }
-
-    /* GST/TIN — BOLD */
     if (client.gstNumber) {
       doc.fillColor(GREY).font("Helvetica-Bold").fontSize(9)
-         .text(`GST/TIN: ${client.gstNumber}`, margin, y, { lineBreak: false });
+         .text(`GSTIN: ${client.gstNumber}`, margin, y, { lineBreak: false, width: 260 });
       y += 13;
     }
 
-    /* Email */
-    doc.fillColor(GREY).font("Helvetica").fontSize(9)
-       .text(client.email || "", margin, y, { lineBreak: false });
-    y += 13;
-
-    /* Phone */
-    if (client.phone) {
+    if (client.company) {
       doc.fillColor(GREY).font("Helvetica").fontSize(9)
-         .text(client.phone, margin, y, { lineBreak: false });
+         .text(client.company, margin, y, { lineBreak: false, width: 260 });
       y += 13;
     }
 
-    /* Address — split on newlines or comma+space, render each part on its own line */
     if (client.address) {
-      const rawAddress = client.address.trim();
-      // Split on newline characters first, then on ", " patterns for inline addresses
-      const addressParts = rawAddress
+      const addrParts = String(client.address)
         .split(/\r?\n/)
-        .flatMap(line => line.split(/,\s+/))
+        .flatMap(l => l.split(/,\s+/))
         .map(s => s.trim())
         .filter(Boolean);
-
-      // Re-join into max ~45-char chunks so each line fits within width:240
-      let currentLine = "";
-      const addressLines = [];
-      addressParts.forEach((part, idx) => {
-        const separator = idx === 0 ? "" : ", ";
-        const candidate = currentLine + separator + part;
-        if (currentLine === "") {
-          currentLine = part;
-        } else if (candidate.length <= 45) {
-          currentLine = candidate;
-        } else {
-          addressLines.push(currentLine);
-          currentLine = part;
-        }
+      let cur = "";
+      const wrapped = [];
+      addrParts.forEach((part, idx) => {
+        const sep  = idx === 0 ? "" : ", ";
+        const cand = cur + sep + part;
+        if (cur === "") cur = part;
+        else if (cand.length <= 48) cur = cand;
+        else { wrapped.push(cur); cur = part; }
       });
-      if (currentLine) addressLines.push(currentLine);
-
-      addressLines.forEach(line => {
+      if (cur) wrapped.push(cur);
+      wrapped.forEach(line => {
         doc.fillColor(GREY).font("Helvetica").fontSize(9)
-           .text(line, margin, y, { lineBreak: false, width: 240 });
-        y += 13;
+           .text(line, margin, y, { lineBreak: false, width: 260 });
+        y += 12;
       });
     }
 
-    /* Net Pay box (right) */
-    const boxX = pW / 2 + 20;
-    const boxY = divY + 18;
-    const boxW = pW - margin - boxX;
-    const boxH = 60;
+    if (client.phone) {
+      doc.fillColor(GREY).font("Helvetica").fontSize(9)
+         .text(`Ph: ${client.phone}`, margin, y, { lineBreak: false });
+      y += 12;
+    }
+    doc.fillColor(GREY).font("Helvetica").fontSize(9)
+       .text(client.email || "", margin, y, { lineBreak: false });
+    y += 12;
 
-    doc.roundedRect(boxX, boxY, boxW, boxH, 6).strokeColor("#d1fae5").lineWidth(1.2).stroke();
-    doc.rect(boxX, boxY, 4, boxH).fill(GREEN);
+    const billToBottom = y;
 
-    doc.fillColor(GREY).font("Helvetica").fontSize(8.5)
-       .text("Total Amount Payable", boxX + 10, boxY + 10, { lineBreak: false });
-    doc.fillColor(GREEN).font("Helvetica-Bold").fontSize(18)
-       .text(fmtPDF(invoice.amount || 0), boxX + 10, boxY + 26, { lineBreak: false });
+    // TODO: Place of Supply isn't stored on the client/invoice — derived from the
+    // last comma-separated segment of the client's address as a stand-in for the state.
+    const placeOfSupply = client.address
+      ? (String(client.address).split(",").pop() || "").trim()
+      : "—";
 
-    y = Math.max(y, boxY + boxH) + 22;
+    let   ry      = billToTop;
+    const labelX  = rightColX;
+    const valueW  = pW - margin - labelX;
 
-    /* ITEMS TABLE HEADER */
-    const tX    = margin;
-    const tW    = cW;
-    const rH    = 28;
-    const items = Array.isArray(invoice.items) ? invoice.items : [];
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
+       .text("Invoice Date:", labelX, ry, { width: 110, lineBreak: false });
+    doc.fillColor(GREY).font("Helvetica").fontSize(9)
+       .text(fmtDate(invoice.date), labelX + 110, ry, { width: valueW - 110, align: "right", lineBreak: false });
+    ry += 16;
 
-    doc.roundedRect(tX, y, tW, 36, 4).fill(RED);
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
+       .text("Due Date:", labelX, ry, { width: 110, lineBreak: false });
+    doc.fillColor(GREY).font("Helvetica").fontSize(9)
+       .text(fmtDate(invoice.dueDate), labelX + 110, ry, { width: valueW - 110, align: "right", lineBreak: false });
+    ry += 16;
 
-    const colQty   = tX + 18;
-    const colDesc  = tX + 80;
-    const colTotal = tX + tW - 90;
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
+       .text("Place of Supply:", labelX, ry, { width: 110, lineBreak: false });
+    doc.fillColor(GREY).font("Helvetica").fontSize(9)
+       .text(placeOfSupply || "—", labelX + 110, ry, { width: valueW - 110, align: "right", lineBreak: false });
 
-    doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(11)
-       .text("Quantity", colQty, y + 12, { lineBreak: false, width: 50, align: "center" })
-       .text("Description", colDesc, y + 12, { lineBreak: false, width: 250 })
-       .text("Total", colTotal, y + 12, { lineBreak: false, width: 80, align: "right" });
+    y = Math.max(billToBottom, ry + 16) + 16;
 
-    y += 36;
+    /* ── ITEMS TABLE ── */
+    const items    = Array.isArray(invoice.items) ? invoice.items : [];
+    const colNum   = margin;
+    const colItem  = margin + 26;
+    const colRate  = margin + cW - 260;
+    const colQty   = margin + cW - 140;
+    const colAmt   = margin + cW - 90;
+
+    doc.moveTo(margin, y).lineTo(pW - margin, y).strokeColor(BORDER).lineWidth(1).stroke();
+    y += 8;
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
+       .text("#",           colNum,  y, { lineBreak: false })
+       .text("Item",        colItem, y, { lineBreak: false })
+       .text("Rate / Item", colRate, y, { width: 90, align: "right", lineBreak: false })
+       .text("Qty",         colQty,  y, { width: 50, align: "right", lineBreak: false })
+       .text("Amount",      colAmt,  y, { width: 55, align: "right", lineBreak: false });
     y += 14;
+    doc.moveTo(margin, y).lineTo(pW - margin, y).strokeColor(BORDER).lineWidth(1).stroke();
+    y += 10;
 
-    /* DATA ROWS */
     if (items.length === 0) {
-      doc.fillColor(GREY).font("Helvetica-Bold").fontSize(10)
-         .text("No items", colDesc, y + 9, { lineBreak: false });
-      y += rH;
+      doc.fillColor(GREY).font("Helvetica").fontSize(9)
+         .text("No items", colItem, y, { lineBreak: false });
+      y += 20;
     } else {
       items.forEach((item, idx) => {
-        const bgColor = idx % 2 === 0 ? "#ffffff" : "#f8fafc";
-        doc.rect(tX, y, tW, rH).fill(bgColor).strokeColor(BORDER).lineWidth(0.5).stroke();
-        doc.fillColor(DARK).font("Helvetica-Bold").fontSize(10)
-           .text(String(item.quantity || 1), colQty, y + 9, { lineBreak: false, width: 50, align: "center" });
-        doc.fillColor(DARK).font("Helvetica-Bold").fontSize(10)
-           .text(item.description || "", colDesc, y + 9, { lineBreak: false, width: 200 });
-        doc.fillColor(DARK).font("Helvetica-Bold").fontSize(10)
-           .text(fmtPDF(item.total || 0), colTotal, y + 9, { lineBreak: false, width: 80, align: "right" });
-        y += rH;
+        const rate = Number(item.unitPrice || 0);
+        doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
+           .text(String(idx + 1), colNum, y, { lineBreak: false });
+        doc.font("Helvetica-Bold").fontSize(9)
+           .text(item.description || "", colItem, y, { width: colRate - colItem - 10, lineBreak: false });
+        doc.font("Helvetica").fontSize(9)
+           .text(fmtPDF(rate),            colRate, y, { width: 90, align: "right", lineBreak: false })
+           .text(String(item.quantity || 1), colQty, y, { width: 50, align: "right", lineBreak: false })
+           .text(fmtPDF(item.total || 0), colAmt,  y, { width: 55, align: "right", lineBreak: false });
+        y += 20;
       });
     }
 
-    y += 14;
-
-    /* TOTAL ROW */
-    doc.rect(tX, y, tW, 32).fill(LIGHT).strokeColor(BORDER).lineWidth(0.8).stroke();
-    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(12)
-       .text("Total Amount", tX + 14, y + 9, { lineBreak: false });
-    const totalAmount = fmtPDF(invoice.amount || 0);
-    const totalWidth  = doc.widthOfString(totalAmount, { fontSize: 12, font: "Helvetica-Bold" });
-    const totalX      = tX + tW - 14 - totalWidth;
-    doc.fillColor(GREEN).font("Helvetica-Bold").fontSize(12)
-       .text(totalAmount, totalX, y + 9, { lineBreak: false });
-
-    y += 32 + 16;
-
-    /* Amount in words */
-    doc.fillColor(GREY).font("Helvetica").fontSize(9)
-       .text("Amount In Words: ", tX, y, { continued: true, lineBreak: false });
-    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
-       .text("Indian Rupee " + numberToWords(Math.round(invoice.amount || 0)) + " Only", { lineBreak: false });
-
-    y += 18;
-    doc.moveTo(margin, y).lineTo(pW - margin, y).strokeColor(BORDER).lineWidth(0.8).stroke();
-    y += 14;
-
-    doc.fillColor(GREY).font("Helvetica").fontSize(8)
-       .text("-- This is a system-generated document. --", 0, y, { align: "center", width: pW, lineBreak: false });
-
-    y += 106;
-
-    /* BANK DETAILS */
-    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(11)
-       .text("Bank Details", margin, y, { lineBreak: false });
     y += 4;
-    doc.moveTo(margin, y + 8).lineTo(margin + 80, y + 8).strokeColor(ORANGE).lineWidth(2).stroke();
-    y += 18;
+    doc.moveTo(margin, y).lineTo(pW - margin, y).strokeColor(BORDER).lineWidth(1).stroke();
+    y += 16;
 
-    const bankData = [
-      { label: "Bank Name",      value: "HDFC BANK" },
-      { label: "Account Name",   value: "QUIBO TECH" },
-      { label: "Account Number", value: "50200092253663" },
-      { label: "IFSC Code",      value: "HDFC0000136" },
-      { label: "Branch",         value: "Ashok Nagar" },
-      { label: "PAN",            value: "HAEP7920N" },
-      { label: "Email",          value: "business@quibotech.com" },
-      { label: "Phone",          value: "9159649688" },
-      { label: "Website",        value: "www.quibotech.com" },
+    /* ── BANK DETAILS (left) + TOTALS BOX (right) ── */
+    const bankTop = y;
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9.5)
+       .text("Bank Details:", margin, y, { lineBreak: false });
+    y += 15;
+
+    const bankRows = [
+      ["Bank:",      "HDFC BANK"],
+      ["Account #:", "50200092253663"],
+      ["IFSC:",      "HDFC0000136"],
+      ["Branch:",    "Ashok Nagar"],
     ];
-
-    const bankLabelWidth = 90;
-    const bankValueX     = margin + bankLabelWidth + 8;
-
-    bankData.forEach((detail) => {
-      doc.fillColor("#475569").font("Helvetica-Bold").fontSize(9)
-         .text(detail.label + ":", margin, y, { lineBreak: false, width: bankLabelWidth });
+    bankRows.forEach(([label, val]) => {
+      doc.fillColor(GREY).font("Helvetica").fontSize(9)
+         .text(label, margin, y, { width: 70, lineBreak: false });
       doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
-         .text(detail.value, bankValueX, y, { lineBreak: false, width: cW - bankLabelWidth - 8 });
+         .text(val, margin + 70, y, { lineBreak: false });
       y += 13;
     });
 
-    /* FOOTER */
-    const footerLogoSize = 22;
-    const footerY        = doc.page.height - 45;
+    const bankBottom = y;
 
-    doc.moveTo(margin, footerY - 12).lineTo(pW - margin, footerY - 12)
-       .strokeColor(BORDER).lineWidth(0.8).stroke();
+    /* Totals box on right */
+    const boxW = 220;
+    const boxX = pW - margin - boxW;
+    let   by   = bankTop;
 
-    const footerText = "Quibo Tech  |  HRMS  |  Confidential 2026";
-    const txtW       = doc.widthOfString(footerText, { fontSize: 7 });
-    const startX     = (pW - (footerLogoSize + 8 + txtW)) / 2;
+    const taxableAmount = Number(invoice.subtotal || 0);
+    const totalTax      = Number(invoice.taxAmount || 0);
+    const halfTax        = parseFloat((totalTax / 2).toFixed(2));
+    const taxRate         = Number(invoice.tax || 0);
+    const halfRate         = (taxRate / 2).toFixed(1);
 
-    if (LOGO_BASE64) {
-      doc.image(Buffer.from(LOGO_BASE64, "base64"), startX, footerY, { width: footerLogoSize, height: footerLogoSize });
-    } else {
-      doc.roundedRect(startX, footerY, footerLogoSize, footerLogoSize, 4).fill(DARK);
-      doc.fillColor(ORANGE).font("Helvetica-Bold").fontSize(12)
-         .text("Q", startX, footerY + 5, { width: footerLogoSize, align: "center", lineBreak: false });
+    // NOTE: schema stores a single combined tax %; split evenly into CGST/SGST for display.
+    const totalsRows = [
+      ["Taxable Amount",   fmtPDF(taxableAmount)],
+      [`CGST ${halfRate}%`, fmtPDF(halfTax)],
+      [`SGST ${halfRate}%`, fmtPDF(halfTax)],
+    ];
+
+    totalsRows.forEach(([label, val]) => {
+      doc.fillColor(GREY).font("Helvetica").fontSize(9)
+         .text(label, boxX, by, { width: 120, lineBreak: false });
+      doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
+         .text(val, boxX + 120, by, { width: boxW - 120, align: "right", lineBreak: false });
+      by += 15;
+    });
+
+    by += 4;
+    doc.moveTo(boxX, by).lineTo(boxX + boxW, by).strokeColor(BORDER).lineWidth(1).stroke();
+    by += 8;
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(11)
+       .text("Total", boxX, by, { width: 120, lineBreak: false });
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(11)
+       .text(fmtPDF(invoice.amount || 0), boxX + 120, by, { width: boxW - 120, align: "right", lineBreak: false });
+    by += 22;
+
+    doc.fillColor(GREY).font("Helvetica").fontSize(9)
+       .text("Amount Payable:", boxX, by, { width: 120, lineBreak: false });
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
+       .text(fmtPDF(invoice.amount || 0), boxX + 120, by, { width: boxW - 120, align: "right", lineBreak: false });
+    by += 14;
+
+    // NOTE: no paidAmount field on the Invoice schema yet — only shown when status is "paid".
+    if (invoice.status === "paid") {
+      doc.fillColor(GREY).font("Helvetica").fontSize(9)
+         .text("Amount Paid:", boxX, by, { width: 120, lineBreak: false });
+      doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
+         .text(fmtPDF(invoice.amount || 0), boxX + 120, by, { width: boxW - 120, align: "right", lineBreak: false });
+      by += 14;
     }
 
-    doc.fillColor("#94a3b8").font("Helvetica").fontSize(7)
-       .text(footerText, startX + footerLogoSize + 8, footerY + 7, { lineBreak: false });
+    y = Math.max(bankBottom, by) + 16;
+
+    /* ── Amount in words ── */
+    doc.fillColor(GREY).font("Helvetica").fontSize(9)
+       .text("Total amount (in words): ", margin, y, { continued: true, lineBreak: false, width: cW });
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9)
+       .text("INR " + numberToWords(Math.round(invoice.amount || 0)) + " Only.", { lineBreak: false, width: cW });
+    y += 26;
+
+    /* ── Notes ── */
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9.5).text("Notes:", margin, y, { lineBreak: false });
+    y += 14;
+    doc.fillColor(GREY).font("Helvetica").fontSize(9)
+       .text(invoice.notes || "Thank you for the Business!", margin, y, { width: cW });
+    y += 22;
+
+    /* ── Terms and Conditions ── */
+    doc.fillColor(DARK).font("Helvetica-Bold").fontSize(9.5).text("Terms and Conditions:", margin, y, { lineBreak: false });
+    y += 14;
+
+    const terms = [
+      "All invoices are payable within 15 days from the date of invoice.",
+      "Late payments penalty of 2.5% interest per day on the outstanding balance.",
+      "Any additional services requested by the client shall be subject to additional fees.",
+      "The client retains all rights to materials provided by them for use in the project.",
+      "Both parties agree to keep all information exchanged during the project confidential.",
+      "This includes business strategies, trade secrets, and any proprietary information.",
+      "Company reserves the right to update these terms and conditions at any time.",
+      "This agreement shall be governed by and construed in accordance with the laws.",
+      "By accepting this invoice, the client agrees to abide by these terms and conditions.",
+    ];
+    doc.fillColor(GREY).font("Helvetica").fontSize(8);
+    terms.forEach((t, i) => {
+      doc.text(`${i + 1}. ${t}`, margin, y, { width: cW });
+      y += 12;
+    });
+
+    y += 30;
+
+    /* ── Receiver's signature ── */
+    doc.moveTo(margin, y).lineTo(margin + 160, y).strokeColor(BORDER).lineWidth(0.8).stroke();
+    y += 6;
+    doc.fillColor(GREY).font("Helvetica").fontSize(8.5).text("Receiver's Signature", margin, y, { lineBreak: false });
+
+    /* ── FOOTER ── */
+    const footerY = pH - 30;
+    doc.fillColor("#94a3b8").font("Helvetica").fontSize(7.5)
+       .text("Page 1/1", margin, footerY, { lineBreak: false });
+    doc.text("This is a digitally signed document", 0, footerY, { align: "center", width: pW, lineBreak: false });
 
     doc.end();
   });
